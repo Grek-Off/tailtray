@@ -1,0 +1,16 @@
+#!/usr/bin/python3
+"""Launch TailTray from an installed tree or a source checkout."""
+
+from pathlib import Path
+import sys
+
+installed = Path("/usr/lib/tailtray")
+if installed.exists():
+    sys.path.insert(0, str(installed))
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from tailtray.app import main
+
+raise SystemExit(main())
+

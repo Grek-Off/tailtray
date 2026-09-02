@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.tailtray</id>
+  <name>TailTray</name>
+  <summary>Native Linux tray controller for Tailscale</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      TailTray controls the official Tailscale daemon from a compact native
+      system tray menu. It supports connection state, account switching, exit
+      nodes, common preferences, and secure automatic sign-in.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.tailtray.desktop</launchable>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-09-02" />
+  </releases>
+</component>

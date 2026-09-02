@@ -17,7 +17,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("AyatanaAppIndicator3", "0.1")
 from gi.repository import AyatanaAppIndicator3 as AppIndicator
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from .core import (
     Snapshot,
@@ -54,6 +54,7 @@ class TailTrayApp:
     def __init__(self) -> None:
         self.cli = TailscaleCLI()
         self.secrets = AuthKeyStore()
+        self.auth_key = self._load_auth_key()
         self.settings = load_settings()
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="tailtray")
         self.snapshot = Snapshot()
@@ -79,13 +80,25 @@ class TailTrayApp:
     @staticmethod
     def _acquire_singleton_lock():
         runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
-        handle = (runtime / f"tailtray-{os.getuid()}.lock").open("w")
+        path = runtime / f"tailtray-{os.getuid()}.lock"
+        flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        handle = os.fdopen(os.open(path, flags, 0o600), "w")
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             handle.close()
             raise RuntimeError("TailTray is already running") from exc
         return handle
+
+    def _load_auth_key(self) -> str:
+        if not self.secrets.available:
+            return ""
+        try:
+            return self.secrets.get()
+        except Exception:
+            return ""
 
     def _loading_menu(self) -> Gtk.Menu:
         menu = Gtk.Menu()
@@ -167,7 +180,7 @@ class TailTrayApp:
         menu.append(_separator())
         menu.append(_menu_item("Tailscale admin console…", lambda *_: webbrowser.open("https://login.tailscale.com/admin/machines")))
         if self.secrets.available:
-            if self.secrets.get():
+            if self.auth_key:
                 menu.append(_menu_item("Replace automatic sign-in key…", self.prompt_auth_key))
                 menu.append(_menu_item("Forget automatic sign-in key", self.forget_auth_key))
             else:
@@ -333,8 +346,8 @@ class TailTrayApp:
         if self.login_token == token:
             return
         self.login_token = token
-        auth_key = self.secrets.get() if self.secrets.available else ""
-        if auth_key:
+        if self.auth_key:
+            auth_key = self.auth_key
             self._action("Automatic sign-in", lambda: self.cli.login_with_auth_key(auth_key))
         elif snapshot.auth_url:
             webbrowser.open(snapshot.auth_url)
@@ -375,6 +388,7 @@ class TailTrayApp:
         except Exception as exc:
             self.notify("TailTray", f"Could not save key: {exc}")
             return
+        self.auth_key = key
         self.login_token = ""
         self.notify("TailTray", "Automatic sign-in key saved in the desktop keyring")
         self.refresh()
@@ -382,6 +396,7 @@ class TailTrayApp:
     def forget_auth_key(self, *_args) -> None:
         try:
             self.secrets.clear()
+            self.auth_key = ""
             self.notify("TailTray", "Automatic sign-in key removed")
         except Exception as exc:
             self.notify("TailTray", f"Could not remove key: {exc}")
@@ -419,18 +434,14 @@ class TailTrayApp:
 
 def main() -> int:
     try:
-        # Imported here so core/parser tests stay independent of a graphical session.
-        global Gdk
-        from gi.repository import Gdk
-
-        TailTrayApp()
+        app = TailTrayApp()
     except RuntimeError as exc:
         print(f"tailtray: {exc}", file=sys.stderr)
         return 1
     Gtk.main()
+    del app
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
