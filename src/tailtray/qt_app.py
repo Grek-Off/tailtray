@@ -11,8 +11,8 @@ import subprocess
 import sys
 from typing import Callable
 
-from PySide6.QtCore import QObject, QPoint, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCursor, QDesktopServices, QIcon
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -36,6 +36,7 @@ from .core import (
 )
 from .secrets import AuthKeyStore
 from .settings import autostart_enabled, load_settings, save_settings, set_autostart
+from .status_notifier import MenuOnlyStatusNotifier
 
 
 APP_ID = "io.github.tailtray"
@@ -95,6 +96,8 @@ class TailTrayQtApp(QObject):
         self.indicator_revision: tuple[str, str] | None = None
         self.menu_open = False
         self.menu_rebuild_pending = False
+        self.status_notifier: MenuOnlyStatusNotifier | None = None
+        self.icon_path = Path()
         self.lock_handle = self._acquire_singleton_lock()
 
         self.bridge = _WorkerBridge(self)
@@ -103,10 +106,13 @@ class TailTrayQtApp(QObject):
 
         self.tray = QSystemTrayIcon(self)
         self.tray.setToolTip("TailTray")
-        self.tray.activated.connect(self._tray_activated)
         self._set_icon("disconnected")
         self._set_menu(self._loading_menu())
         self.tray.show()
+        try:
+            self.status_notifier = MenuOnlyStatusNotifier.install(self.icon_path, self)
+        except RuntimeError as exc:
+            print(f"tailtray: native left-click menu is unavailable: {exc}", file=sys.stderr)
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(REFRESH_MILLISECONDS)
@@ -155,38 +161,10 @@ class TailTrayQtApp(QObject):
         menu.aboutToHide.connect(self._menu_closed)
         self.menu = menu
         self.tray.setContextMenu(menu)
+        if self.status_notifier is not None:
+            self.status_notifier.menu_changed()
         if previous is not None:
             previous.deleteLater()
-
-    def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.Trigger and self.menu is not None:
-            # Plasma treats a generic QSystemTrayIcon as an application item,
-            # so left click is delivered as Activate rather than ContextMenu.
-            # Defer the popup until the D-Bus Activate/mouse-release cycle has
-            # completed; otherwise Plasma may immediately dismiss the menu.
-            # The launcher selects XCB for this Qt backend because Wayland does
-            # not permit this application-initiated grabbing popup and Qt can
-            # crash while trying to create it.
-            QTimer.singleShot(75, self._show_menu_from_left_click)
-
-    def _show_menu_from_left_click(self) -> None:
-        menu = self.menu
-        if menu is None or menu.isVisible():
-            return
-        tray_geometry = self.tray.geometry()
-        anchor = tray_geometry.center() if tray_geometry.isValid() else QCursor.pos()
-        size = menu.sizeHint()
-        screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
-        available = screen.availableGeometry()
-        x = anchor.x() - size.width() // 2
-        if anchor.y() > available.center().y():
-            y = anchor.y() - size.height() - 8
-        else:
-            y = anchor.y() + 8
-        x = max(available.left(), min(x, available.right() - size.width() + 1))
-        y = max(available.top(), min(y, available.bottom() - size.height() + 1))
-        menu.popup(QPoint(x, y))
-        menu.activateWindow()
 
     def _menu_opened(self) -> None:
         self.menu_open = True
@@ -240,7 +218,10 @@ class TailTrayQtApp(QObject):
 
     def _set_icon(self, state: str) -> None:
         icon = _tray_icon_directory() / f"{TRAY_ICON_PREFIX}-{state}.png"
+        self.icon_path = icon
         self.tray.setIcon(QIcon(str(icon)))
+        if self.status_notifier is not None:
+            self.status_notifier.set_icon(icon)
 
     def _update_indicator(self) -> None:
         snapshot = self.snapshot

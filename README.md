@@ -60,7 +60,7 @@ Installer проверяет зависимости, устанавливает 
 Для ручной установки зависимостей:
 
 ```bash
-sudo dnf install tailscale python3-gobject python3-pyside6 libappindicator-gtk3 libsecret libnotify xorg-x11-server-Xwayland
+sudo dnf install tailscale python3-gobject python3-pyside6 libappindicator-gtk3 libsecret libnotify
 ```
 
 GNOME по умолчанию может не показывать StatusNotifier/AppIndicator icons. Если
@@ -75,10 +75,10 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 Plasma собственный каталог растровых tray-иконок, чтобы исключить подхват старой
 symbolic-иконки из глобального кэша темы. На KDE автоматически выбирается
 нативный Qt 6 backend: дерево меню строится заранее и не заменяется, пока меню
-открыто. В Wayland-сессии только этот небольшой Qt-процесс автоматически
-запускается через XWayland/XCB: так KDE может безопасно открыть меню по левому
-клику, не вызывая падение внутри Qt Wayland. Для диагностики backend можно явно выбрать через
-`TAILTRAY_BACKEND=qt` или `TAILTRAY_BACKEND=gtk`.
+открыто. TailTray помечает StatusNotifierItem как menu-only, поэтому левый и
+правый клик открывают одно и то же нативное меню Plasma без отдельного popup-окна.
+Для диагностики backend можно явно выбрать через `TAILTRAY_BACKEND=qt` или
+`TAILTRAY_BACKEND=gtk`.
 
 Запуск прямо из checkout без установки:
 

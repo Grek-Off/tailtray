@@ -18,7 +18,7 @@ while IFS= read -r pid; do
 done < <(pgrep -u "$current_uid" -f '^/usr/bin/python3 /usr/bin/tailtray$' || true)
 
 missing=()
-for package in tailscale python3-gobject python3-pyside6 libappindicator-gtk3 libsecret libnotify xorg-x11-server-Xwayland; do
+for package in tailscale python3-gobject python3-pyside6 libappindicator-gtk3 libsecret libnotify; do
     if ! rpm -q "$package" >/dev/null 2>&1; then
         missing+=("$package")
     fi
