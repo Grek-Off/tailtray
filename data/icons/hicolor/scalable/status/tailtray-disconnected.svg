@@ -1,12 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <!-- GTK recolors #2e3436 to the panel foreground; opacity preserves the two-tone dot grid. -->
-  <g fill="#2e3436" opacity=".4">
+  <g fill="#929292" stroke="#000" stroke-width=".7">
     <circle cx="3.2" cy="3.2" r="1.6"/><circle cx="8" cy="3.2" r="1.6"/><circle cx="12.8" cy="3.2" r="1.6"/>
     <circle cx="3.2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="12.8" cy="8" r="1.6"/>
     <circle cx="3.2" cy="12.8" r="1.6"/><circle cx="8" cy="12.8" r="1.6"/><circle cx="12.8" cy="12.8" r="1.6"/>
-  </g>
-  <g fill="#2e3436">
-    <circle cx="3.2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="12.8" cy="8" r="1.6"/>
-    <circle cx="8" cy="12.8" r="1.6"/>
   </g>
 </svg>

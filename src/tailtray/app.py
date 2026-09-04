@@ -65,7 +65,7 @@ class TailTrayApp:
 
         self.indicator = AppIndicator.Indicator.new(
             APP_ID,
-            "tailtray-disconnected-symbolic",
+            "tailtray-disconnected",
             AppIndicator.IndicatorCategory.SYSTEM_SERVICES,
         )
         development_icons = Path(__file__).resolve().parents[2] / "data" / "icons" / "hicolor" / "scalable" / "status"
@@ -137,13 +137,13 @@ class TailTrayApp:
     def _update_indicator(self) -> None:
         snapshot = self.snapshot
         if snapshot.connected and snapshot.exit_node_id:
-            icon = "tailtray-exit-node-symbolic"
+            icon = "tailtray-exit-node"
         elif snapshot.connected:
-            icon = "tailtray-connected-symbolic"
+            icon = "tailtray-connected"
         elif snapshot.backend_state == "Starting":
-            icon = "tailtray-connecting-symbolic"
+            icon = "tailtray-connecting"
         else:
-            icon = "tailtray-disconnected-symbolic"
+            icon = "tailtray-disconnected"
         self.indicator.set_icon_full(icon, snapshot.display_status)
         self.indicator.set_title(snapshot.display_status)
 

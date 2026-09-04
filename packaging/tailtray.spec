@@ -45,7 +45,7 @@ PYTHONPATH=src %{python3} -m unittest discover -s tests -v
 %{_prefix}/lib/tailtray/
 %{_datadir}/applications/io.github.tailtray.desktop
 %{_metainfodir}/io.github.tailtray.metainfo.xml
-%{_datadir}/icons/hicolor/scalable/status/tailtray-*-symbolic.svg
+%{_datadir}/icons/hicolor/scalable/status/tailtray-*.svg
 
 %changelog
 * Wed Sep 02 2026 TailTray contributors <codex@local> - 0.1.0-1
