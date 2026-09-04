@@ -34,6 +34,15 @@ from .settings import autostart_enabled, load_settings, save_settings, set_autos
 
 APP_ID = "io.github.tailtray"
 REFRESH_SECONDS = 5
+TRAY_ICON_PREFIX = "tailtray-hc-v2"
+
+
+def _tray_icon_directory() -> Path:
+    """Return a private icon path so Plasma cannot reuse themed/cached icons."""
+    development_icons = Path(__file__).resolve().parents[2] / "data" / "tray-icons"
+    if development_icons.exists():
+        return development_icons
+    return Path("/usr/share/tailtray/icons")
 
 
 def _menu_item(label: str, callback: Callable | None = None, *, sensitive: bool = True) -> Gtk.MenuItem:
@@ -65,12 +74,12 @@ class TailTrayApp:
 
         self.indicator = AppIndicator.Indicator.new(
             APP_ID,
-            "tailtray-disconnected",
+            f"{TRAY_ICON_PREFIX}-disconnected",
             AppIndicator.IndicatorCategory.SYSTEM_SERVICES,
         )
-        development_icons = Path(__file__).resolve().parents[2] / "data" / "icons" / "hicolor" / "scalable" / "status"
-        if development_icons.exists():
-            self.indicator.set_icon_theme_path(str(development_icons))
+        tray_icons = _tray_icon_directory()
+        if tray_icons.exists():
+            self.indicator.set_icon_theme_path(str(tray_icons))
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator.set_title("TailTray")
         self._set_menu(self._loading_menu())
@@ -137,13 +146,14 @@ class TailTrayApp:
     def _update_indicator(self) -> None:
         snapshot = self.snapshot
         if snapshot.connected and snapshot.exit_node_id:
-            icon = "tailtray-exit-node"
+            state = "exit-node"
         elif snapshot.connected:
-            icon = "tailtray-connected"
+            state = "connected"
         elif snapshot.backend_state == "Starting":
-            icon = "tailtray-connecting"
+            state = "connecting"
         else:
-            icon = "tailtray-disconnected"
+            state = "disconnected"
+        icon = f"{TRAY_ICON_PREFIX}-{state}"
         self.indicator.set_icon_full(icon, snapshot.display_status)
         self.indicator.set_title(snapshot.display_status)
 

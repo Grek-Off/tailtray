@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <g stroke="#000" stroke-width=".7">
-    <circle cx="3.2" cy="3.2" r="1.6" fill="#929292"/><circle cx="8" cy="3.2" r="1.6" fill="#fff"/><circle cx="12.8" cy="3.2" r="1.6" fill="#fff"/>
-    <circle cx="3.2" cy="8" r="1.6" fill="#fff"/><circle cx="8" cy="8" r="1.6" fill="#929292"/><circle cx="12.8" cy="8" r="1.6" fill="#fff"/>
-    <circle cx="3.2" cy="12.8" r="1.6" fill="#929292"/><circle cx="8" cy="12.8" r="1.6" fill="#929292"/><circle cx="12.8" cy="12.8" r="1.6" fill="#fff"/>
+  <g stroke-width=".75">
+    <circle cx="3.2" cy="3.2" r="1.6" fill="#000" stroke="#fff"/><circle cx="8" cy="3.2" r="1.6" fill="#fff" stroke="#000"/><circle cx="12.8" cy="3.2" r="1.6" fill="#fff" stroke="#000"/>
+    <circle cx="3.2" cy="8" r="1.6" fill="#fff" stroke="#000"/><circle cx="8" cy="8" r="1.6" fill="#000" stroke="#fff"/><circle cx="12.8" cy="8" r="1.6" fill="#fff" stroke="#000"/>
+    <circle cx="3.2" cy="12.8" r="1.6" fill="#000" stroke="#fff"/><circle cx="8" cy="12.8" r="1.6" fill="#000" stroke="#fff"/><circle cx="12.8" cy="12.8" r="1.6" fill="#fff" stroke="#000"/>
   </g>
 </svg>

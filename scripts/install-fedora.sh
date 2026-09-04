@@ -4,6 +4,7 @@ set -euo pipefail
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 desktop_file="$project_dir/data/io.github.tailtray.desktop"
 icon_dir="$project_dir/data/icons/hicolor/scalable/status"
+tray_icon_dir="$project_dir/data/tray-icons"
 
 missing=()
 for package in tailscale python3-gobject libappindicator-gtk3 libsecret libnotify; do
@@ -26,6 +27,10 @@ sudo install -m 0644 "$project_dir/data/io.github.tailtray.metainfo.xml" /usr/sh
 for icon in "$icon_dir"/*.svg; do
     sudo install -m 0644 "$icon" "/usr/share/icons/hicolor/scalable/status/$(basename "$icon")"
 done
+sudo install -d /usr/share/tailtray/icons
+for icon in "$tray_icon_dir"/*.png; do
+    sudo install -m 0644 "$icon" "/usr/share/tailtray/icons/$(basename "$icon")"
+done
 sudo gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 
 sudo systemctl enable --now tailscaled.service
@@ -37,4 +42,3 @@ install -m 0644 "$desktop_file" "$HOME/.config/autostart/io.github.tailtray.desk
 echo
 echo "TailTray installed. Start it from the application menu or run: tailtray"
 echo "It will start automatically with your next desktop login."
-

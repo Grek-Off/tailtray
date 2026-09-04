@@ -1,9 +1,11 @@
 from pathlib import Path
+import struct
 import unittest
 import xml.etree.ElementTree as ET
 
 
 ICON_DIR = Path(__file__).resolve().parents[1] / "data" / "icons" / "hicolor" / "scalable" / "status"
+TRAY_ICON_DIR = Path(__file__).resolve().parents[1] / "data" / "tray-icons"
 
 
 class IconTests(unittest.TestCase):
@@ -26,6 +28,15 @@ class IconTests(unittest.TestCase):
         disconnected = ET.parse(ICON_DIR / "tailtray-disconnected.svg")
         self.assertGreaterEqual(len(connected.findall(".//svg:circle", namespace)), 9)
         self.assertEqual(len(disconnected.findall(".//svg:circle", namespace)), 9)
+
+    def test_kde_tray_icons_are_cache_busting_rgba_pngs(self):
+        icons = sorted(TRAY_ICON_DIR.glob("tailtray-hc-v2-*.png"))
+        self.assertEqual(len(icons), 4)
+        for icon in icons:
+            data = icon.read_bytes()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(struct.unpack(">II", data[16:24]), (64, 64))
+            self.assertEqual(data[25], 6, "tray PNG must contain an alpha channel")
 
 
 if __name__ == "__main__":
