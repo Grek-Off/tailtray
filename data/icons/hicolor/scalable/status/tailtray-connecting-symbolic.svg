@@ -1,7 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <g fill="#000">
-    <circle cx="8" cy="2.5" r="1.6"/><circle cx="13.5" cy="8" r="1.6" opacity=".75"/>
-    <circle cx="8" cy="13.5" r="1.6" opacity=".5"/><circle cx="2.5" cy="8" r="1.6" opacity=".25"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <g fill="#2e3436" opacity=".4">
+    <circle cx="3.2" cy="3.2" r="1.6"/><circle cx="8" cy="3.2" r="1.6"/><circle cx="12.8" cy="3.2" r="1.6"/>
+    <circle cx="3.2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="12.8" cy="8" r="1.6"/>
+    <circle cx="3.2" cy="12.8" r="1.6"/><circle cx="8" cy="12.8" r="1.6"/><circle cx="12.8" cy="12.8" r="1.6"/>
+  </g>
+  <g fill="#2e3436">
+    <circle cx="8" cy="3.2" r="1.6"/><circle cx="12.8" cy="3.2" r="1.6"/>
+    <circle cx="3.2" cy="8" r="1.6"/><circle cx="12.8" cy="8" r="1.6"/>
+    <circle cx="12.8" cy="12.8" r="1.6"/>
   </g>
 </svg>
-

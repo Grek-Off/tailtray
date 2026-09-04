@@ -1,8 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <g fill="#000" opacity=".55">
-    <circle cx="4" cy="4" r="2"/><circle cx="12" cy="4" r="2"/>
-    <circle cx="4" cy="12" r="2"/><circle cx="12" cy="12" r="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <g fill="#2e3436" opacity=".4">
+    <circle cx="3.2" cy="3.2" r="1.6"/><circle cx="8" cy="3.2" r="1.6"/><circle cx="12.8" cy="3.2" r="1.6"/>
+    <circle cx="3.2" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="12.8" cy="8" r="1.6"/>
+    <circle cx="3.2" cy="12.8" r="1.6"/><circle cx="8" cy="12.8" r="1.6"/><circle cx="12.8" cy="12.8" r="1.6"/>
   </g>
-  <path d="M4 8h8" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round"/>
 </svg>
-
