@@ -5,6 +5,7 @@ test:
 
 check: test
 	python3 -m compileall -q src tests
+	bash -n scripts/diagnose.sh scripts/install-fedora.sh
 	@for icon in data/icons/hicolor/scalable/status/*.svg; do xmllint --noout "$$icon"; done
 	@test "$$(find data/tray-icons -maxdepth 1 -name 'tailtray-hc-v2-*.png' | wc -l)" -eq 4
 	xmllint --noout data/io.github.tailtray.metainfo.xml
