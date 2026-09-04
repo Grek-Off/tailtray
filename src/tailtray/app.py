@@ -70,6 +70,9 @@ class TailTrayApp:
         self.snapshot = Snapshot()
         self.refresh_running = False
         self.login_token = ""
+        self.menu: Gtk.Menu | None = None
+        self.menu_revision: tuple[object, ...] | None = None
+        self.indicator_revision: tuple[str, str] | None = None
         self.lock_handle = self._acquire_singleton_lock()
 
         self.indicator = AppIndicator.Indicator.new(
@@ -119,7 +122,19 @@ class TailTrayApp:
         return menu
 
     def _set_menu(self, menu: Gtk.Menu) -> None:
-        self.indicator.set_menu(menu)
+        # Keep the exported GTK tree stable. Replacing it repeatedly makes KDE
+        # invalidate DBusMenu item IDs while the pointer is inside a submenu.
+        self.menu = menu
+        self.indicator.set_menu(self.menu)
+
+    def _menu_revision(self, snapshot: Snapshot) -> tuple[object, ...]:
+        return (
+            snapshot,
+            self.secrets.available,
+            bool(self.auth_key),
+            bool(self.settings.get("automatic_login", True)),
+            autostart_enabled(),
+        )
 
     def _refresh_timer(self) -> bool:
         self.refresh()
@@ -135,11 +150,15 @@ class TailTrayApp:
     def _finish_refresh(self, future: Future) -> bool:
         self.refresh_running = False
         try:
-            self.snapshot = future.result()
+            snapshot = future.result()
         except Exception as exc:  # defensive: keep the tray alive
-            self.snapshot = Snapshot(error=str(exc), error_kind="command")
+            snapshot = Snapshot(error=str(exc), error_kind="command")
+        next_menu_revision = self._menu_revision(snapshot)
+        self.snapshot = snapshot
         self._update_indicator()
-        self._set_menu(self._build_menu())
+        if next_menu_revision != self.menu_revision:
+            self._set_menu(self._build_menu())
+            self.menu_revision = next_menu_revision
         self._maybe_auto_login()
         return GLib.SOURCE_REMOVE
 
@@ -154,8 +173,12 @@ class TailTrayApp:
         else:
             state = "disconnected"
         icon = f"{TRAY_ICON_PREFIX}-{state}"
+        revision = (icon, snapshot.display_status)
+        if revision == self.indicator_revision:
+            return
         self.indicator.set_icon_full(icon, snapshot.display_status)
         self.indicator.set_title(snapshot.display_status)
+        self.indicator_revision = revision
 
     def _build_menu(self) -> Gtk.Menu:
         snapshot = self.snapshot
@@ -352,6 +375,9 @@ class TailTrayApp:
         else:
             if on_success is not None:
                 on_success(result)
+        # The menu has closed after an action, so its controls can now be
+        # safely rebuilt even if tailscaled reports the same snapshot.
+        self.menu_revision = None
         GLib.timeout_add(350, self._refresh_once)
         return GLib.SOURCE_REMOVE
 
