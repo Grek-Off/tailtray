@@ -172,42 +172,78 @@ class TailTrayApp:
             menu.append(_menu_item("Disconnect", lambda *_: self._action("Disconnecting", self.cli.disconnect)))
         else:
             menu.append(_menu_item("Connect", lambda *_: self._action("Connecting", self.cli.connect)))
-        if not snapshot.error_kind and not snapshot.needs_login:
-            menu.append(_menu_item("Full restart…", self.confirm_full_restart))
 
-        if snapshot.profiles:
-            menu.append(self._profiles_item(snapshot))
         if snapshot.devices:
             menu.append(self._devices_item(snapshot))
         if snapshot.connected:
             menu.append(self._exit_nodes_item(snapshot))
-            menu.append(self._preferences_item(snapshot))
+
         menu.append(_separator())
-        menu.append(_menu_item("Tailscale admin console…", lambda *_: webbrowser.open("https://login.tailscale.com/admin/machines")))
+        menu.append(self._more_item(snapshot))
+        menu.append(_menu_item("Quit TailTray", self.quit))
+        menu.show_all()
+        return menu
+
+    def _more_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
+        root = _menu_item("More")
+        submenu = Gtk.Menu()
+        if snapshot.profiles:
+            submenu.append(self._profiles_item(snapshot))
+        if snapshot.connected:
+            submenu.append(self._preferences_item(snapshot))
+        submenu.append(self._authentication_item())
+        submenu.append(self._maintenance_item(snapshot))
+        submenu.append(self._application_item())
+        root.set_submenu(submenu)
+        return root
+
+    def _authentication_item(self) -> Gtk.MenuItem:
+        root = _menu_item("Authentication")
+        submenu = Gtk.Menu()
+        submenu.append(
+            _menu_item(
+                "Tailscale admin console…",
+                lambda *_: webbrowser.open("https://login.tailscale.com/admin/machines"),
+            )
+        )
         if self.secrets.available:
+            submenu.append(_separator())
             if self.auth_key:
-                menu.append(_menu_item("Replace automatic sign-in key…", self.prompt_auth_key))
-                menu.append(_menu_item("Forget automatic sign-in key", self.forget_auth_key))
+                submenu.append(_menu_item("Replace automatic sign-in key…", self.prompt_auth_key))
+                submenu.append(_menu_item("Forget automatic sign-in key", self.forget_auth_key))
             else:
-                menu.append(_menu_item("Set up automatic sign-in…", self.prompt_auth_key))
+                submenu.append(_menu_item("Set up automatic sign-in…", self.prompt_auth_key))
 
         automatic = Gtk.CheckMenuItem.new_with_label("Sign in automatically when required")
         automatic.set_active(bool(self.settings.get("automatic_login", True)))
         automatic.connect("toggled", self.toggle_automatic_login)
         automatic.show()
-        menu.append(automatic)
+        submenu.append(automatic)
+        root.set_submenu(submenu)
+        return root
 
+    def _maintenance_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
+        root = _menu_item("Maintenance")
+        submenu = Gtk.Menu()
+        if not snapshot.error_kind and not snapshot.needs_login:
+            submenu.append(_menu_item("Full restart…", self.confirm_full_restart))
+        submenu.append(_menu_item("Refresh status", self.refresh))
+        if snapshot.version:
+            submenu.append(_separator())
+            submenu.append(_menu_item(f"Tailscale {snapshot.version}", sensitive=False))
+        root.set_submenu(submenu)
+        return root
+
+    def _application_item(self) -> Gtk.MenuItem:
+        root = _menu_item("Application")
+        submenu = Gtk.Menu()
         startup = Gtk.CheckMenuItem.new_with_label("Start TailTray on login")
         startup.set_active(autostart_enabled())
         startup.connect("toggled", self.toggle_autostart)
         startup.show()
-        menu.append(startup)
-
-        menu.append(_separator())
-        menu.append(_menu_item("Refresh", self.refresh))
-        menu.append(_menu_item("Quit TailTray", self.quit))
-        menu.show_all()
-        return menu
+        submenu.append(startup)
+        root.set_submenu(submenu)
+        return root
 
     def _profiles_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
         selected = next((profile for profile in snapshot.profiles if profile.selected), None)
