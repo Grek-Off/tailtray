@@ -1,0 +1,36 @@
+image: python:3.13-slim
+
+stages:
+  - verify
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+cache:
+  key:
+    files:
+      - pyproject.toml
+  paths:
+    - .cache/pip/
+
+verify:
+  stage: verify
+  interruptible: true
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends desktop-file-utils libxml2-utils
+    - python -m pip install -e '.[dev]'
+  script:
+    - ruff check src tests
+    - pytest -q
+    - python -m compileall -q src tests
+    - find data/icons/hicolor/scalable/status -name '*.svg' -exec xmllint --noout '{}' '+'
+    - xmllint --noout data/io.github.tailtray.metainfo.xml
+    - desktop-file-validate data/io.github.tailtray.desktop
+    - python -m build
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - dist/
