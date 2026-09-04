@@ -26,7 +26,7 @@ verify:
     - ruff check src tests
     - pytest -q
     - python -m compileall -q src tests
-    - bash -n scripts/diagnose.sh scripts/install-fedora.sh
+    - bash -n scripts/diagnose.sh scripts/install-lib.sh scripts/install-fedora.sh
     - find data/icons/hicolor/scalable/status -name '*.svg' -exec xmllint --noout '{}' '+'
     - xmllint --noout data/io.github.tailtray.metainfo.xml
     - desktop-file-validate data/io.github.tailtray.desktop
