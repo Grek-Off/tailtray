@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 from typing import Any, Callable, Mapping, Sequence
 
 
@@ -73,6 +74,22 @@ class ExitNode:
 
 
 @dataclass(frozen=True, slots=True)
+class Device:
+    id: str
+    name: str
+    ips: tuple[str, ...] = ()
+    online: bool = False
+    os: str = ""
+    is_self: bool = False
+
+    @property
+    def label(self) -> str:
+        marker = "●" if self.online else "○"
+        suffix = " (this device)" if self.is_self else ""
+        return f"{marker} {self.name}{suffix}"
+
+
+@dataclass(frozen=True, slots=True)
 class Snapshot:
     backend_state: str = "Unknown"
     version: str = ""
@@ -82,6 +99,7 @@ class Snapshot:
     auth_url: str = ""
     health: tuple[str, ...] = ()
     profiles: tuple[Profile, ...] = ()
+    devices: tuple[Device, ...] = ()
     exit_nodes: tuple[ExitNode, ...] = ()
     exit_node_id: str = ""
     preferences: Mapping[str, Any] = field(default_factory=dict)
@@ -195,20 +213,45 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
     tailnet = payload.get("CurrentTailnet") if isinstance(payload.get("CurrentTailnet"), Mapping) else {}
     exit_status = payload.get("ExitNodeStatus") if isinstance(payload.get("ExitNodeStatus"), Mapping) else {}
     selected_id = str(exit_status.get("ID") or "")
+    root_ips = payload.get("TailscaleIPs") if isinstance(payload.get("TailscaleIPs"), list) else []
+    self_ips = self_node.get("TailscaleIPs") if isinstance(self_node.get("TailscaleIPs"), list) else []
+    self_ips = self_ips or root_ips
+    devices: list[Device] = []
+    self_name = str(self_node.get("HostName") or self_node.get("DNSName") or "").rstrip(".")
+    if self_name or self_ips:
+        devices.append(
+            Device(
+                id=str(self_node.get("ID") or "self"),
+                name=self_name.split(".", 1)[0] or "This device",
+                ips=tuple(str(ip) for ip in self_ips or []),
+                online=str(payload.get("BackendState") or "") == "Running",
+                os=str(self_node.get("OS") or ""),
+                is_self=True,
+            )
+        )
     nodes: list[ExitNode] = []
     for peer in _peer_values(payload.get("Peer")):
+        peer_dns_name = str(peer.get("DNSName") or "").rstrip(".")
+        peer_name = str(peer.get("HostName") or peer_dns_name.split(".", 1)[0] or peer.get("ID") or "Device")
+        peer_ips = peer.get("TailscaleIPs") if isinstance(peer.get("TailscaleIPs"), list) else []
+        devices.append(
+            Device(
+                id=str(peer.get("ID") or peer.get("PublicKey") or peer_name),
+                name=peer_name,
+                ips=tuple(str(ip) for ip in peer_ips),
+                online=bool(peer.get("Online")),
+                os=str(peer.get("OS") or ""),
+            )
+        )
         if not peer.get("ExitNodeOption"):
             continue
-        dns_name = str(peer.get("DNSName") or "").rstrip(".")
-        name = str(peer.get("HostName") or dns_name.split(".", 1)[0] or peer.get("ID") or "Exit node")
-        ips = peer.get("TailscaleIPs") if isinstance(peer.get("TailscaleIPs"), list) else []
-        target = str(ips[0]) if ips else dns_name or name
+        target = str(peer_ips[0]) if peer_ips else peer_dns_name or peer_name
         location = peer.get("Location") if isinstance(peer.get("Location"), Mapping) else {}
         peer_id = str(peer.get("ID") or "")
         nodes.append(
             ExitNode(
                 id=peer_id,
-                name=name,
+                name=peer_name,
                 target=target,
                 online=bool(peer.get("Online")),
                 selected=bool(peer.get("ExitNode")) or (bool(selected_id) and peer_id == selected_id),
@@ -216,8 +259,9 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
                 city=str(location.get("City") or ""),
             )
         )
+    devices.sort(key=lambda device: (not device.is_self, not device.online, device.name.casefold()))
     nodes.sort(key=lambda node: (not node.online, node.country.casefold(), node.city.casefold(), node.name.casefold()))
-    ips = payload.get("TailscaleIPs") if isinstance(payload.get("TailscaleIPs"), list) else self_node.get("TailscaleIPs", [])
+    ips = root_ips or self_ips
     health = payload.get("Health") if isinstance(payload.get("Health"), list) else []
     return Snapshot(
         backend_state=str(payload.get("BackendState") or "Unknown"),
@@ -228,6 +272,7 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
         auth_url=str(payload.get("AuthURL") or ""),
         health=tuple(str(item) for item in health),
         profiles=profiles,
+        devices=tuple(devices),
         exit_nodes=tuple(nodes),
         exit_node_id=selected_id,
         preferences=preferences or {},
@@ -302,6 +347,27 @@ class TailscaleCLI:
     def disconnect(self) -> None:
         self._run(["down"])
 
+    def wait_for_daemon(self, timeout: float = 20.0) -> None:
+        deadline = time.monotonic() + timeout
+        last_error: TailscaleError | None = None
+        while time.monotonic() < deadline:
+            try:
+                self._run(["status", "--json"], timeout=2)
+                return
+            except TailscaleError as exc:
+                if exc.kind == "missing":
+                    raise
+                last_error = exc
+                time.sleep(0.4)
+        detail = f": {last_error}" if last_error else ""
+        raise TailscaleError(f"tailscaled did not become ready after restart{detail}", kind="daemon")
+
+    def full_restart(self, restart_service: Callable[[], None]) -> None:
+        self.disconnect()
+        restart_service()
+        self.wait_for_daemon()
+        self.connect()
+
     def set_exit_node(self, target: str) -> None:
         self._run(["set", f"--exit-node={target}"])
 
@@ -352,3 +418,6 @@ def privileged_operator_command(username: str) -> list[str]:
 def privileged_start_service_command() -> list[str]:
     return ["pkexec", "systemctl", "enable", "--now", "tailscaled.service"]
 
+
+def privileged_restart_service_command() -> list[str]:
+    return ["pkexec", "systemctl", "restart", "tailscaled.service"]

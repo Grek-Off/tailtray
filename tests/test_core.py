@@ -8,6 +8,7 @@ from tailtray.core import (
     parse_status,
     preference_value,
     privileged_operator_command,
+    privileged_restart_service_command,
 )
 
 
@@ -48,6 +49,10 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(snapshot.tailnet, "example.com")
         self.assertEqual(snapshot.hostname, "fedora")
         self.assertEqual(snapshot.ips[0], "100.64.0.10")
+        self.assertEqual([device.name for device in snapshot.devices], ["fedora", "amsterdam", "offline-router"])
+        self.assertTrue(snapshot.devices[0].is_self)
+        self.assertTrue(snapshot.devices[1].online)
+        self.assertEqual(snapshot.devices[2].ips, ("100.100.1.2",))
         self.assertEqual([node.name for node in snapshot.exit_nodes], ["amsterdam", "offline-router"])
         self.assertTrue(snapshot.exit_nodes[0].selected)
         self.assertEqual(snapshot.exit_nodes[0].target, "100.100.1.1")
@@ -107,6 +112,31 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(
             TailscaleCLI(runner=runner).begin_interactive_login(),
             "https://login.tailscale.com/a/abc123",
+        )
+
+    def test_full_restart_runs_down_service_restart_status_and_up(self):
+        calls = []
+
+        def runner(argv, timeout):
+            calls.append(tuple(argv))
+            return CommandResult("{}" if argv[1:3] == ["status", "--json"] else "", "", 0)
+
+        cli = TailscaleCLI(runner=runner)
+        cli.full_restart(lambda: calls.append(("systemctl", "restart", "tailscaled.service")))
+        self.assertEqual(
+            calls,
+            [
+                ("tailscale", "down"),
+                ("systemctl", "restart", "tailscaled.service"),
+                ("tailscale", "status", "--json"),
+                ("tailscale", "up", "--timeout=20s"),
+            ],
+        )
+
+    def test_privileged_restart_command_is_fixed(self):
+        self.assertEqual(
+            privileged_restart_service_command(),
+            ["pkexec", "systemctl", "restart", "tailscaled.service"],
         )
 
 

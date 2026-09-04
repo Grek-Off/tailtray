@@ -25,6 +25,7 @@ from .core import (
     TailscaleError,
     preference_value,
     privileged_operator_command,
+    privileged_restart_service_command,
     privileged_start_service_command,
 )
 from .secrets import AuthKeyStore
@@ -171,9 +172,13 @@ class TailTrayApp:
             menu.append(_menu_item("Disconnect", lambda *_: self._action("Disconnecting", self.cli.disconnect)))
         else:
             menu.append(_menu_item("Connect", lambda *_: self._action("Connecting", self.cli.connect)))
+        if not snapshot.error_kind and not snapshot.needs_login:
+            menu.append(_menu_item("Full restart…", self.confirm_full_restart))
 
         if snapshot.profiles:
             menu.append(self._profiles_item(snapshot))
+        if snapshot.devices:
+            menu.append(self._devices_item(snapshot))
         if snapshot.connected:
             menu.append(self._exit_nodes_item(snapshot))
             menu.append(self._preferences_item(snapshot))
@@ -216,6 +221,22 @@ class TailTrayApp:
             radio.connect("activate", self.switch_profile, profile.id, profile.selected)
             radio.show()
             submenu.append(radio)
+        root.set_submenu(submenu)
+        return root
+
+    def _devices_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
+        root = _menu_item(f"Devices ({len(snapshot.devices)})")
+        submenu = Gtk.Menu()
+        for device in snapshot.devices:
+            device_item = _menu_item(device.label, sensitive=bool(device.ips))
+            if device.ips:
+                addresses = Gtk.Menu()
+                for address in device.ips:
+                    addresses.append(
+                        _menu_item(address, lambda _item, ip=address, name=device.name: self.copy_address(ip, name))
+                    )
+                device_item.set_submenu(addresses)
+            submenu.append(device_item)
         root.set_submenu(submenu)
         return root
 
@@ -321,8 +342,11 @@ class TailTrayApp:
     def copy_ip(self, *_args) -> None:
         if not self.snapshot.ips:
             return
-        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(self.snapshot.ips[0], -1)
-        self.notify("TailTray", f"Copied {self.snapshot.ips[0]}")
+        self.copy_address(self.snapshot.ips[0], self.snapshot.hostname or "this device")
+
+    def copy_address(self, address: str, device_name: str) -> None:
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(address, -1)
+        self.notify("TailTray", f"Copied {device_name}: {address}")
 
     def interactive_login(self, *_args) -> None:
         if self.snapshot.auth_url:
@@ -404,6 +428,39 @@ class TailTrayApp:
 
     def start_service(self, *_args) -> None:
         self._privileged_action("Starting Tailscale service", privileged_start_service_command())
+
+    def confirm_full_restart(self, *_args) -> None:
+        dialog = Gtk.MessageDialog(
+            transient_for=None,
+            flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.CANCEL,
+            text="Fully restart Tailscale?",
+        )
+        dialog.format_secondary_text(
+            "This runs tailscale down, restarts tailscaled.service, then runs tailscale up. "
+            "All Tailscale connections will be interrupted briefly."
+        )
+        dialog.add_button("Restart", Gtk.ResponseType.OK)
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK:
+            self._action("Full restart", self._full_restart)
+
+    def _full_restart(self) -> None:
+        def restart_service() -> None:
+            completed = subprocess.run(
+                privileged_restart_service_command(),
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            if completed.returncode:
+                detail = (completed.stderr or completed.stdout).strip()
+                raise TailscaleError(detail or "Could not restart tailscaled.service")
+
+        self.cli.full_restart(restart_service)
 
     def grant_operator(self, *_args) -> None:
         self._privileged_action("Granting Tailscale control", privileged_operator_command(getpass.getuser()))

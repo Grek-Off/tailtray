@@ -11,11 +11,15 @@ WireGuard-ключи, device identity и состояние узла остаю�
 
 - подключение и отключение без запуска терминала;
 - состояние, имя устройства, Tailscale IP и проблемы health check;
+- список устройств текущего tailnet с online/offline состоянием и всеми
+  Tailscale IP (клик копирует адрес);
 - переключение сохранённых аккаунтов/профилей;
 - выбор, отключение и автоматический подбор exit node;
 - DNS, subnet routes, LAN access через exit node, shields-up и update check;
 - запуск `tailscaled` и выдача текущему пользователю operator-прав через
   стандартный polkit-диалог;
+- полный restart: `tailscale down` → restart systemd service → ожидание daemon →
+  `tailscale up`;
 - автозапуск вместе с desktop-сессией;
 - обычный однократный browser login;
 - опциональный unattended login с auth key в GNOME Keyring/libsecret.
