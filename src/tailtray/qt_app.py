@@ -11,7 +11,7 @@ import subprocess
 import sys
 from typing import Callable
 
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSystemTrayIcon,
     QVBoxLayout,
+    QWidget,
 )
 
 from .core import (
@@ -101,6 +102,15 @@ class TailTrayQtApp(QObject):
         self.bridge.refresh_finished.connect(self._finish_refresh)
         self.bridge.action_finished.connect(self._finish_action)
 
+        # Wayland only permits a grabbing popup with a transient parent. This
+        # transparent tool window consumes Plasma's XDG activation token and
+        # gives the left-click menu a valid parent without showing UI itself.
+        self.popup_anchor = QWidget()
+        self.popup_anchor.setWindowTitle("TailTray")
+        self.popup_anchor.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self.popup_anchor.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.popup_anchor.resize(1, 1)
+
         self.tray = QSystemTrayIcon(self)
         self.tray.setToolTip("TailTray")
         self.tray.activated.connect(self._tray_activated)
@@ -151,6 +161,7 @@ class TailTrayQtApp(QObject):
         tree is built before publication, and an open tree is never replaced.
         """
         previous = self.menu
+        menu.setParent(self.popup_anchor)
         menu.aboutToShow.connect(self._menu_opened)
         menu.aboutToHide.connect(self._menu_closed)
         self.menu = menu
@@ -162,15 +173,44 @@ class TailTrayQtApp(QObject):
         if reason == QSystemTrayIcon.ActivationReason.Trigger and self.menu is not None:
             # Plasma treats a generic QSystemTrayIcon as an application item,
             # so left click is delivered as Activate rather than ContextMenu.
-            # Showing the already-built local QMenu also avoids another remote
-            # DBusMenu round-trip on the common interaction path.
-            self.menu.popup(QCursor.pos())
+            # Defer the popup until the D-Bus Activate/mouse-release cycle has
+            # completed; otherwise Wayland may immediately dismiss the menu.
+            QTimer.singleShot(75, self._show_menu_from_left_click)
+
+    def _show_menu_from_left_click(self) -> None:
+        menu = self.menu
+        if menu is None or menu.isVisible():
+            return
+        tray_geometry = self.tray.geometry()
+        anchor = tray_geometry.center() if tray_geometry.isValid() else QCursor.pos()
+        size = menu.sizeHint()
+        screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
+        available = screen.availableGeometry()
+        x = anchor.x() - size.width() // 2
+        if anchor.y() > available.center().y():
+            y = anchor.y() - size.height() - 8
+        else:
+            y = anchor.y() + 8
+        x = max(available.left(), min(x, available.right() - size.width() + 1))
+        y = max(available.top(), min(y, available.bottom() - size.height() + 1))
+        self.popup_anchor.move(anchor)
+        self.popup_anchor.show()
+        self.popup_anchor.raise_()
+        self.popup_anchor.activateWindow()
+        QTimer.singleShot(25, lambda: self._popup_anchored_menu(menu, QPoint(x, y)))
+
+    def _popup_anchored_menu(self, menu: QMenu, position: QPoint) -> None:
+        if menu is not self.menu or not self.popup_anchor.isVisible():
+            return
+        menu.popup(position)
+        menu.activateWindow()
 
     def _menu_opened(self) -> None:
         self.menu_open = True
 
     def _menu_closed(self) -> None:
         self.menu_open = False
+        self.popup_anchor.hide()
         if self.menu_rebuild_pending:
             QTimer.singleShot(0, self._apply_pending_menu)
 
@@ -597,6 +637,7 @@ class TailTrayQtApp(QObject):
         self.refresh_timer.stop()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.tray.hide()
+        self.popup_anchor.close()
         QApplication.instance().quit()
 
 
