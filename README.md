@@ -14,6 +14,8 @@ WireGuard-ключи, device identity и состояние узла остаю�
 - самоконтрастная dot-grid иконка в стиле Tailscale: чёрно-белые точки с
   противоположным контуром видны на светлой и тёмной панели; для KDE Plasma
   используется приватный набор RGBA PNG, который не перекрашивается темой;
+- нативный Qt 6 tray/menu backend на KDE Plasma; GTK/AppIndicator остаётся
+  fallback-ом для GNOME и других окружений;
 - компактное верхнее меню только с основными действиями; аккаунты, настройки,
   авторизация, обслуживание и параметры приложения разложены по вложенным меню;
 - список устройств текущего tailnet с online/offline состоянием и всеми
@@ -58,7 +60,7 @@ Installer проверяет зависимости, устанавливает 
 Для ручной установки зависимостей:
 
 ```bash
-sudo dnf install tailscale python3-gobject libappindicator-gtk3 libsecret libnotify
+sudo dnf install tailscale python3-gobject python3-pyside6 libappindicator-gtk3 libsecret libnotify
 ```
 
 GNOME по умолчанию может не показывать StatusNotifier/AppIndicator icons. Если
@@ -71,7 +73,10 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 
 В KDE Plasma дополнительное расширение обычно не требуется. TailTray передаёт
 Plasma собственный каталог растровых tray-иконок, чтобы исключить подхват старой
-symbolic-иконки из глобального кэша темы.
+symbolic-иконки из глобального кэша темы. На KDE автоматически выбирается
+нативный Qt 6 backend: дерево меню строится заранее и не заменяется, пока меню
+открыто. Для диагностики backend можно явно выбрать через
+`TAILTRAY_BACKEND=qt` или `TAILTRAY_BACKEND=gtk`.
 
 Запуск прямо из checkout без установки:
 

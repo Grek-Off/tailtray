@@ -10,7 +10,6 @@ if installed.exists():
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tailtray.app import main
+from tailtray.launcher import main
 
 raise SystemExit(main())
-

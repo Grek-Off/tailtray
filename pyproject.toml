@@ -13,11 +13,15 @@ license-files = ["LICENSE"]
 authors = [{name = "TailTray contributors"}]
 classifiers = [
   "Environment :: X11 Applications :: GTK",
+  "Environment :: X11 Applications :: Qt",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
 ]
 
 [project.optional-dependencies]
+kde = [
+  "PySide6>=6.6,<7",
+]
 dev = [
   "build>=1.2,<2",
   "pytest>=8,<10",
@@ -25,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-tailtray = "tailtray.app:main"
+tailtray = "tailtray.launcher:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

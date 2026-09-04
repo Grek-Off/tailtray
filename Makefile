@@ -12,7 +12,7 @@ check: test
 	desktop-file-validate data/io.github.tailtray.desktop
 
 run:
-	PYTHONPATH=src python3 -m tailtray.app
+	PYTHONPATH=src python3 -m tailtray.launcher
 
 install:
 	./scripts/install-fedora.sh
