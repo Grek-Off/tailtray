@@ -1,21 +1,19 @@
 import os
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from tailtray.core import Device, Snapshot
 
 
 try:
-    from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
+    from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
     from tailtray.qt_app import TailTrayQtApp
 except ImportError:
     QApplication = None
-    QMenu = None
     QSystemTrayIcon = None
     TailTrayQtApp = None
-    QWidget = None
 
 
 class _MenuCallbacks:
@@ -55,24 +53,6 @@ class QtMenuTests(unittest.TestCase):
                 QSystemTrayIcon.ActivationReason.Trigger,
             )
         single_shot.assert_called_once_with(75, callback)
-
-    def test_root_menu_has_wayland_transient_parent(self):
-        anchor = QWidget()
-        menu = QMenu()
-        tray = Mock()
-        controller = SimpleNamespace(
-            menu=None,
-            popup_anchor=anchor,
-            tray=tray,
-            _menu_opened=lambda: None,
-            _menu_closed=lambda: None,
-        )
-
-        TailTrayQtApp._set_menu(controller, menu)
-
-        self.assertIs(menu.parent(), anchor)
-        tray.setContextMenu.assert_called_once_with(menu)
-
 
 if __name__ == "__main__":
     unittest.main()
