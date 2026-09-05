@@ -114,6 +114,24 @@ class CoreTests(unittest.TestCase):
             "https://login.tailscale.com/a/abc123",
         )
 
+    def test_connect_preserves_nondefault_preferences_by_passing_no_flags(self):
+        calls = []
+
+        def runner(argv, timeout):
+            calls.append((tuple(argv), timeout))
+            if len(argv) > 2:
+                return CommandResult(
+                    "",
+                    "changing settings via 'tailscale up' requires mentioning all non-default flags: "
+                    "tailscale up --exit-node=100.90.32.25",
+                    1,
+                )
+            return CommandResult()
+
+        TailscaleCLI(runner=runner).connect()
+
+        self.assertEqual(calls, [(("tailscale", "up"), 25)])
+
     def test_full_restart_runs_down_service_restart_status_and_up(self):
         calls = []
 
@@ -129,7 +147,7 @@ class CoreTests(unittest.TestCase):
                 ("tailscale", "down"),
                 ("systemctl", "restart", "tailscaled.service"),
                 ("tailscale", "status", "--json"),
-                ("tailscale", "up", "--timeout=20s"),
+                ("tailscale", "up"),
             ],
         )
 

@@ -342,7 +342,10 @@ class TailscaleCLI:
             return Snapshot(error=str(exc), error_kind=exc.kind)
 
     def connect(self) -> None:
-        self._run(["up", "--timeout=20s"], timeout=25)
+        # With no flags, `tailscale up` restores the saved preferences. Passing
+        # even the CLI timeout flag makes Tailscale require every non-default
+        # setting (exit node, routes, DNS, and so on) to be repeated.
+        self._run(["up"], timeout=25)
 
     def disconnect(self) -> None:
         self._run(["down"])
