@@ -73,6 +73,22 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(exit_node_offline.exit_node_active)
         self.assertIn("exit node unavailable", exit_node_offline.display_status)
 
+    def test_generic_hostname_uses_magicdns_device_name(self):
+        payload = json.loads(json.dumps(STATUS))
+        payload["Peer"]["nodekey:ipad"] = {
+            "ID": "node-ipad",
+            "HostName": "localhost",
+            "DNSName": "ipad-air-gen-4.example.ts.net.",
+            "TailscaleIPs": ["100.68.249.3"],
+            "OS": "iOS",
+            "Online": False,
+        }
+
+        snapshot = parse_status(payload)
+        ipad = next(device for device in snapshot.devices if device.id == "node-ipad")
+
+        self.assertEqual(ipad.name, "ipad-air-gen-4")
+
     def test_reconnect_policy_respects_manual_disconnect_and_uses_backoff(self):
         policy = ReconnectPolicy(base_delay=5, maximum_delay=20)
         stopped = Snapshot(backend_state="Stopped")

@@ -266,6 +266,23 @@ def _peer_values(payload: Any) -> list[Mapping[str, Any]]:
     return []
 
 
+_GENERIC_HOSTNAMES = {
+    "localhost",
+    "localhost.localdomain",
+    "localhost6",
+    "localhost6.localdomain6",
+}
+
+
+def _device_name(node: Mapping[str, Any], fallback: str = "Device") -> str:
+    hostname = str(node.get("HostName") or "").rstrip(".")
+    dns_name = str(node.get("DNSName") or "").rstrip(".")
+    dns_label = dns_name.split(".", 1)[0]
+    if not hostname or hostname.casefold() in _GENERIC_HOSTNAMES:
+        return dns_label or hostname or str(node.get("ID") or fallback)
+    return hostname
+
+
 def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = (), preferences: Mapping[str, Any] | None = None) -> Snapshot:
     self_node = payload.get("Self") if isinstance(payload.get("Self"), Mapping) else {}
     tailnet = payload.get("CurrentTailnet") if isinstance(payload.get("CurrentTailnet"), Mapping) else {}
@@ -275,12 +292,12 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
     self_ips = self_node.get("TailscaleIPs") if isinstance(self_node.get("TailscaleIPs"), list) else []
     self_ips = self_ips or root_ips
     devices: list[Device] = []
-    self_name = str(self_node.get("HostName") or self_node.get("DNSName") or "").rstrip(".")
-    if self_name or self_ips:
+    self_name = _device_name(self_node, "This device")
+    if self_node or self_ips:
         devices.append(
             Device(
                 id=str(self_node.get("ID") or "self"),
-                name=self_name.split(".", 1)[0] or "This device",
+                name=self_name,
                 ips=tuple(str(ip) for ip in self_ips or []),
                 online=str(payload.get("BackendState") or "") == "Running",
                 os=str(self_node.get("OS") or ""),
@@ -290,7 +307,7 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
     nodes: list[ExitNode] = []
     for peer in _peer_values(payload.get("Peer")):
         peer_dns_name = str(peer.get("DNSName") or "").rstrip(".")
-        peer_name = str(peer.get("HostName") or peer_dns_name.split(".", 1)[0] or peer.get("ID") or "Device")
+        peer_name = _device_name(peer)
         peer_ips = peer.get("TailscaleIPs") if isinstance(peer.get("TailscaleIPs"), list) else []
         devices.append(
             Device(
@@ -325,7 +342,7 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
         backend_state=str(payload.get("BackendState") or "Unknown"),
         version=str(payload.get("Version") or ""),
         tailnet=str(tailnet.get("Name") or ""),
-        hostname=str(self_node.get("HostName") or ""),
+        hostname=self_name,
         ips=tuple(str(ip) for ip in ips or []),
         auth_url=str(payload.get("AuthURL") or ""),
         health=tuple(str(item) for item in health),
