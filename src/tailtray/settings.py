@@ -20,7 +20,11 @@ def config_path() -> Path:
 
 
 def load_settings() -> dict[str, bool]:
-    defaults = {"automatic_login": True}
+    defaults = {
+        "automatic_login": True,
+        "automatic_reconnect": True,
+        "want_connected": True,
+    }
     try:
         payload = json.loads(config_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -67,4 +71,3 @@ def set_autostart(enabled: bool) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     destination.chmod(0o644)
-

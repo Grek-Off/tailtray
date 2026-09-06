@@ -102,6 +102,7 @@ class Snapshot:
     devices: tuple[Device, ...] = ()
     exit_nodes: tuple[ExitNode, ...] = ()
     exit_node_id: str = ""
+    exit_node_online: bool = False
     preferences: Mapping[str, Any] = field(default_factory=dict)
     error: str = ""
     error_kind: str = ""
@@ -115,6 +116,11 @@ class Snapshot:
         return self.backend_state in {"NeedsLogin", "NeedsMachineAuth"}
 
     @property
+    def exit_node_active(self) -> bool:
+        """Whether the selected exit node is usable in the current IPN state."""
+        return self.connected and bool(self.exit_node_id) and self.exit_node_online
+
+    @property
     def display_status(self) -> str:
         if self.error_kind == "missing":
             return "Tailscale is not installed"
@@ -123,7 +129,10 @@ class Snapshot:
         if self.error_kind == "permission":
             return "No permission to control Tailscale"
         if self.backend_state == "Running":
-            return f"Connected to {self.tailnet}" if self.tailnet else "Connected"
+            status = f"Connected to {self.tailnet}" if self.tailnet else "Connected"
+            if self.exit_node_id and not self.exit_node_active:
+                return f"{status} · exit node unavailable"
+            return status
         if self.backend_state == "Starting":
             return "Connecting…"
         if self.backend_state == "NeedsMachineAuth":
@@ -133,6 +142,55 @@ class Snapshot:
         if self.backend_state == "Stopped":
             return "Disconnected"
         return self.error or "Tailscale unavailable"
+
+
+@dataclass(slots=True)
+class ReconnectPolicy:
+    """Track bounded automatic reconnect attempts independently of either UI."""
+
+    base_delay: float = 5.0
+    maximum_delay: float = 60.0
+    failures: int = 0
+    next_attempt_at: float = 0.0
+    in_flight: bool = False
+
+    def should_attempt(
+        self,
+        snapshot: Snapshot,
+        *,
+        enabled: bool,
+        want_connected: bool,
+        now: float,
+    ) -> bool:
+        if snapshot.connected:
+            self.reset()
+            return False
+        if (
+            not enabled
+            or not want_connected
+            or snapshot.backend_state != "Stopped"
+            or self.in_flight
+            or now < self.next_attempt_at
+        ):
+            return False
+        self.in_flight = True
+        return True
+
+    def finish(self, *, succeeded: bool, now: float) -> float:
+        self.in_flight = False
+        if succeeded:
+            self.reset()
+            return 0.0
+        self.failures += 1
+        exponent = min(self.failures - 1, 16)
+        delay = min(self.base_delay * (2**exponent), self.maximum_delay)
+        self.next_attempt_at = now + delay
+        return delay
+
+    def reset(self) -> None:
+        self.failures = 0
+        self.next_attempt_at = 0.0
+        self.in_flight = False
 
 
 Runner = Callable[[Sequence[str], float], CommandResult]
@@ -275,6 +333,7 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
         devices=tuple(devices),
         exit_nodes=tuple(nodes),
         exit_node_id=selected_id,
+        exit_node_online=bool(exit_status.get("Online")) if selected_id else False,
         preferences=preferences or {},
     )
 

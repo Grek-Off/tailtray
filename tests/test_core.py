@@ -3,6 +3,8 @@ import unittest
 
 from tailtray.core import (
     CommandResult,
+    ReconnectPolicy,
+    Snapshot,
     TailscaleCLI,
     parse_profiles,
     parse_status,
@@ -56,6 +58,43 @@ class CoreTests(unittest.TestCase):
         self.assertEqual([node.name for node in snapshot.exit_nodes], ["amsterdam", "offline-router"])
         self.assertTrue(snapshot.exit_nodes[0].selected)
         self.assertEqual(snapshot.exit_nodes[0].target, "100.100.1.1")
+        self.assertTrue(snapshot.exit_node_active)
+
+    def test_exit_node_is_not_active_when_tailnet_or_exit_node_is_offline(self):
+        stopped_payload = json.loads(json.dumps(STATUS))
+        stopped_payload["BackendState"] = "Stopped"
+        stopped = parse_status(stopped_payload)
+        self.assertFalse(stopped.exit_node_active)
+        self.assertEqual(stopped.display_status, "Disconnected")
+
+        exit_node_offline_payload = json.loads(json.dumps(STATUS))
+        exit_node_offline_payload["ExitNodeStatus"]["Online"] = False
+        exit_node_offline = parse_status(exit_node_offline_payload)
+        self.assertFalse(exit_node_offline.exit_node_active)
+        self.assertIn("exit node unavailable", exit_node_offline.display_status)
+
+    def test_reconnect_policy_respects_manual_disconnect_and_uses_backoff(self):
+        policy = ReconnectPolicy(base_delay=5, maximum_delay=20)
+        stopped = Snapshot(backend_state="Stopped")
+
+        self.assertFalse(policy.should_attempt(stopped, enabled=False, want_connected=True, now=0))
+        self.assertFalse(policy.should_attempt(stopped, enabled=True, want_connected=False, now=0))
+        self.assertFalse(
+            policy.should_attempt(Snapshot(backend_state="NeedsLogin"), enabled=True, want_connected=True, now=0)
+        )
+        self.assertFalse(
+            policy.should_attempt(Snapshot(backend_state="Starting"), enabled=True, want_connected=True, now=0)
+        )
+        self.assertTrue(policy.should_attempt(stopped, enabled=True, want_connected=True, now=0))
+        self.assertFalse(policy.should_attempt(stopped, enabled=True, want_connected=True, now=0))
+        self.assertEqual(policy.finish(succeeded=False, now=0), 5)
+        self.assertFalse(policy.should_attempt(stopped, enabled=True, want_connected=True, now=4.9))
+        self.assertTrue(policy.should_attempt(stopped, enabled=True, want_connected=True, now=5))
+        self.assertEqual(policy.finish(succeeded=False, now=5), 10)
+        policy.failures = 100
+        self.assertEqual(policy.finish(succeeded=False, now=15), 20)
+        self.assertFalse(policy.should_attempt(Snapshot(backend_state="Running"), enabled=True, want_connected=True, now=6))
+        self.assertEqual(policy.failures, 0)
 
     def test_parse_profiles_current_cli_shape(self):
         profiles = parse_profiles(

@@ -10,9 +10,15 @@ from tailtray.settings import autostart_enabled, load_settings, save_settings, s
 class SettingsTests(unittest.TestCase):
     def test_settings_round_trip_and_mode(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
-            self.assertTrue(load_settings()["automatic_login"])
+            defaults = load_settings()
+            self.assertTrue(defaults["automatic_login"])
+            self.assertTrue(defaults["automatic_reconnect"])
+            self.assertTrue(defaults["want_connected"])
             save_settings({"automatic_login": False})
-            self.assertFalse(load_settings()["automatic_login"])
+            loaded = load_settings()
+            self.assertFalse(loaded["automatic_login"])
+            self.assertTrue(loaded["automatic_reconnect"])
+            self.assertTrue(loaded["want_connected"])
             path = Path(directory) / "tailtray" / "config.json"
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 

@@ -27,6 +27,10 @@ WireGuard-ключи, device identity и состояние узла остаю�
   стандартный polkit-диалог;
 - полный restart: `tailscale down` → restart systemd service → ожидание daemon →
   `tailscale up`;
+- автоматический реконнект после неожиданного `Stopped` с ограниченным backoff;
+  ручной **Disconnect** сохраняется как намерение и не отменяется автоматикой;
+- exit-node иконка показывается только при `Running` и живом выбранном узле;
+  сохранённый, но недоступный exit node явно помечается как `unavailable`;
 - автозапуск вместе с desktop-сессией;
 - обычный однократный browser login;
 - опциональный unattended login с auth key в GNOME Keyring/libsecret.
