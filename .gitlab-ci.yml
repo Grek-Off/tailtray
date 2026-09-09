@@ -20,9 +20,10 @@ verify:
   interruptible: true
   before_script:
     - apt-get update -qq
-    - apt-get install -y --no-install-recommends desktop-file-utils libxml2-utils
-    - python -m pip install -e '.[dev]'
+    - apt-get install -y --no-install-recommends desktop-file-utils libxml2-utils dbus libegl1 libgl1 libopengl0 libglib2.0-0 libxkbcommon0
+    - python -m pip install -e '.[dev,kde]'
   script:
+    - python -c 'from PySide6.QtWidgets import QApplication; from PySide6.QtDBus import QDBusConnection'
     - ruff check src tests
     - pytest -q
     - python -m compileall -q src tests

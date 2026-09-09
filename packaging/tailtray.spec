@@ -9,13 +9,14 @@ BuildArch:      noarch
 Requires:       tailscale >= 1.56
 Requires:       python3
 Requires:       python3-gobject
+Requires:       python3-pyside6
 Requires:       libappindicator-gtk3
 Requires:       libsecret
 Requires:       libnotify
 Recommends:     gnome-shell-extension-appindicator
 
 %description
-TailTray is an unofficial GTK/AppIndicator controller for the official
+TailTray is an unofficial Qt/GTK tray controller for the official
 Tailscale daemon. It manages connection state, profiles, exit nodes, common
 preferences, and optional keyring-backed automatic sign-in.
 

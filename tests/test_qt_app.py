@@ -76,6 +76,7 @@ class QtMenuTests(unittest.TestCase):
     def test_exit_node_menu_marks_saved_but_inactive_node_unavailable(self):
         snapshot = Snapshot(
             backend_state="Running",
+            self_online=True,
             exit_node_id="node-1",
             exit_node_online=False,
             exit_nodes=(
@@ -98,7 +99,8 @@ class QtMenuTests(unittest.TestCase):
         controller.settings = {"automatic_reconnect": True, "want_connected": True}
         controller.reconnect_policy = ReconnectPolicy(failures=2, next_attempt_at=30, in_flight=False)
         controller.cli = Mock()
-        controller._action = Mock()
+        controller.operation_coordinator = Mock(busy=False)
+        controller._set_busy_controls = Mock()
 
         with patch("tailtray.qt_app.save_settings") as save:
             controller.disconnect_tailscale()
@@ -106,14 +108,15 @@ class QtMenuTests(unittest.TestCase):
         self.assertFalse(controller.settings["want_connected"])
         self.assertEqual(controller.reconnect_policy.failures, 0)
         save.assert_called_once_with(controller.settings)
-        controller._action.assert_called_once_with("Disconnecting", controller.cli.disconnect)
+        controller.operation_coordinator.request_disconnect.assert_called_once_with(controller.cli.disconnect)
 
     def test_manual_connect_restores_reconnect_intent(self):
         controller = TailTrayQtApp.__new__(TailTrayQtApp)
         controller.settings = {"automatic_reconnect": True, "want_connected": False}
         controller.reconnect_policy = ReconnectPolicy(failures=2, next_attempt_at=30)
         controller.cli = Mock()
-        controller._start_expected_connection_action = Mock()
+        controller.operation_coordinator = Mock(busy=False)
+        controller._action = Mock()
 
         with patch("tailtray.qt_app.save_settings") as save:
             controller.connect_tailscale()
@@ -121,7 +124,7 @@ class QtMenuTests(unittest.TestCase):
         self.assertTrue(controller.settings["want_connected"])
         self.assertEqual(controller.reconnect_policy.failures, 0)
         save.assert_called_once_with(controller.settings)
-        controller._start_expected_connection_action.assert_called_once_with("Connecting", controller.cli.connect)
+        controller._action.assert_called_once_with("Connecting", controller.cli.connect)
 
     def test_stopped_snapshot_schedules_only_one_automatic_reconnect(self):
         controller = TailTrayQtApp.__new__(TailTrayQtApp)
@@ -133,8 +136,11 @@ class QtMenuTests(unittest.TestCase):
         controller.executor = Mock()
         controller.executor.submit.return_value = pending
         controller.bridge = Mock()
+        controller._init_operation_controller(controller.executor, lambda callback: callback())
+        controller._set_busy_controls = Mock()
+        controller.operation_coordinator.accept_refresh(controller.operation_coordinator.start_refresh())
 
-        with patch("tailtray.qt_app.time.monotonic", return_value=10):
+        with patch("tailtray.controller.time.monotonic", return_value=10):
             controller._maybe_auto_reconnect()
             controller._maybe_auto_reconnect()
 

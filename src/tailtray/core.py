@@ -15,8 +15,9 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from threading import Lock
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 
 LOGIN_URL_RE = re.compile(r"https://[^\s<>\"']+")
@@ -102,23 +103,55 @@ class Snapshot:
     devices: tuple[Device, ...] = ()
     exit_nodes: tuple[ExitNode, ...] = ()
     exit_node_id: str = ""
-    exit_node_online: bool = False
+    exit_node_online: Optional[bool] = None
     preferences: Mapping[str, Any] = field(default_factory=dict)
     error: str = ""
     error_kind: str = ""
+    self_online: Optional[bool] = None
 
     @property
     def connected(self) -> bool:
-        return self.backend_state == "Running"
+        return self.backend_state == "Running" and not self.error and not self.error_kind
+
+    @property
+    def degraded(self) -> bool:
+        return self.connected and (bool(self.health) or self.self_online is False)
+
+    @property
+    def exit_node_state(self) -> str:
+        """UI state for the configured exit node's availability."""
+        if not self.exit_node_id:
+            return "none"
+        if not self.connected:
+            return "inactive"
+        if (
+            self.health
+            or self.self_online is False
+            or self.self_online is None
+            or self.exit_node_online is None
+        ):
+            return "unknown"
+        return "active" if self.exit_node_online else "unavailable"
 
     @property
     def needs_login(self) -> bool:
         return self.backend_state in {"NeedsLogin", "NeedsMachineAuth"}
 
     @property
+    def exit_node_label(self) -> str:
+        selected = next((node for node in self.exit_nodes if node.id == self.exit_node_id), None)
+        name = selected.name if selected else self.exit_node_id or "None"
+        suffix = {
+            "unknown": " (availability unknown)",
+            "unavailable": " (unavailable)",
+            "inactive": " (inactive)",
+        }.get(self.exit_node_state, "")
+        return f"Exit node: {name}{suffix}"
+
+    @property
     def exit_node_active(self) -> bool:
         """Whether the selected exit node is usable in the current IPN state."""
-        return self.connected and bool(self.exit_node_id) and self.exit_node_online
+        return self.exit_node_state == "active"
 
     @property
     def display_status(self) -> str:
@@ -128,9 +161,15 @@ class Snapshot:
             return "Tailscale service is not running"
         if self.error_kind == "permission":
             return "No permission to control Tailscale"
+        if self.error_kind or self.error:
+            return self.error or "Tailscale status unknown"
         if self.backend_state == "Running":
             status = f"Connected to {self.tailnet}" if self.tailnet else "Connected"
-            if self.exit_node_id and not self.exit_node_active:
+            if self.health:
+                return "Tailscale enabled · degraded connection"
+            if self.self_online is False:
+                return "Tailscale enabled · device offline"
+            if self.exit_node_state == "unavailable":
                 return f"{status} · exit node unavailable"
             return status
         if self.backend_state == "Starting":
@@ -141,7 +180,7 @@ class Snapshot:
             return "Sign in required"
         if self.backend_state == "Stopped":
             return "Disconnected"
-        return self.error or "Tailscale unavailable"
+        return self.error or "Tailscale status unknown"
 
 
 @dataclass(slots=True)
@@ -163,12 +202,18 @@ class ReconnectPolicy:
         now: float,
     ) -> bool:
         if snapshot.connected:
+            # A Running status may be the acknowledgement for an attempt that
+            # is still in flight.  Clear backoff, but do not lose that marker.
+            in_flight = self.in_flight
             self.reset()
+            self.in_flight = in_flight
             return False
         if (
             not enabled
             or not want_connected
             or snapshot.backend_state != "Stopped"
+            or bool(snapshot.error)
+            or bool(snapshot.error_kind)
             or self.in_flight
             or now < self.next_attempt_at
         ):
@@ -179,8 +224,12 @@ class ReconnectPolicy:
     def finish(self, *, succeeded: bool, now: float) -> float:
         self.in_flight = False
         if succeeded:
-            self.reset()
-            return 0.0
+            # Keep a short settling window while the next status poll catches
+            # up; otherwise a transient Stopped result immediately runs `up`
+            # again after a successful command.
+            self.failures = 0
+            self.next_attempt_at = now + self.base_delay
+            return self.base_delay
         self.failures += 1
         exponent = min(self.failures - 1, 16)
         delay = min(self.base_delay * (2**exponent), self.maximum_delay)
@@ -217,7 +266,16 @@ def _classify_error(text: str) -> str:
     lowered = text.casefold()
     if "not installed" in lowered or "no such file" in lowered:
         return "missing"
-    if any(part in lowered for part in ("doesn't appear to be running", "not running?", "failed to connect")):
+    if any(
+        part in lowered
+        for part in (
+            "doesn't appear to be running",
+            "does not appear to be running",
+            "tailscaled is not running",
+            "cannot connect to tailscaled",
+            "failed to connect to local tailscaled",
+        )
+    ):
         return "daemon"
     if any(part in lowered for part in ("access denied", "permission denied", "operation not permitted", "operator")):
         return "permission"
@@ -291,6 +349,7 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
     root_ips = payload.get("TailscaleIPs") if isinstance(payload.get("TailscaleIPs"), list) else []
     self_ips = self_node.get("TailscaleIPs") if isinstance(self_node.get("TailscaleIPs"), list) else []
     self_ips = self_ips or root_ips
+    self_online = bool(self_node["Online"]) if "Online" in self_node else None
     devices: list[Device] = []
     self_name = _device_name(self_node, "This device")
     if self_node or self_ips:
@@ -299,7 +358,7 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
                 id=str(self_node.get("ID") or "self"),
                 name=self_name,
                 ips=tuple(str(ip) for ip in self_ips or []),
-                online=str(payload.get("BackendState") or "") == "Running",
+                online=self_online is True and payload.get("BackendState") == "Running",
                 os=str(self_node.get("OS") or ""),
                 is_self=True,
             )
@@ -350,8 +409,9 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
         devices=tuple(devices),
         exit_nodes=tuple(nodes),
         exit_node_id=selected_id,
-        exit_node_online=bool(exit_status.get("Online")) if selected_id else False,
+        exit_node_online=bool(exit_status["Online"]) if selected_id and "Online" in exit_status else None,
         preferences=preferences or {},
+        self_online=self_online,
     )
 
 
@@ -384,6 +444,26 @@ class TailscaleCLI:
     def __init__(self, executable: str = "tailscale", runner: Runner | None = None):
         self.executable = executable
         self._runner = runner or _default_runner
+        self._metadata_ttl = 30.0
+        self._metadata_lock = Lock()
+        self._metadata_epoch = 0
+        self._profiles_cache: tuple[float, tuple[Profile, ...], tuple[str, ...]] | None = None
+        self._preferences_cache: tuple[float, Mapping[str, Any], tuple[str, ...]] | None = None
+
+    def _invalidate_metadata(self) -> None:
+        with self._metadata_lock:
+            self._metadata_epoch += 1
+            self._profiles_cache = None
+            self._preferences_cache = None
+
+    @staticmethod
+    def _status_context(payload: Mapping[str, Any]) -> tuple[str, ...]:
+        self_node = payload.get("Self") if isinstance(payload.get("Self"), Mapping) else {}
+        tailnet = payload.get("CurrentTailnet") if isinstance(payload.get("CurrentTailnet"), Mapping) else {}
+        return (
+            str(self_node.get("ID") or self_node.get("HostName") or ""),
+            str(tailnet.get("Name") or ""),
+        )
 
     def _run(self, args: Sequence[str], timeout: float = 15.0, *, check: bool = True) -> CommandResult:
         result = self._runner([self.executable, *args], timeout)
@@ -395,24 +475,53 @@ class TailscaleCLI:
     def snapshot(self) -> Snapshot:
         try:
             status_payload = _json(self._run(["status", "--json"], timeout=8), "tailscale status")
-            profiles: tuple[Profile, ...] = ()
-            preferences: Mapping[str, Any] = {}
-            profile_result = self._run(["switch", "--list", "--json"], timeout=5, check=False)
-            if profile_result.returncode == 0:
-                try:
-                    profiles = parse_profiles(json.loads(profile_result.stdout))
-                except json.JSONDecodeError:
-                    pass
-            pref_result = self._run(["get", "--json", "all"], timeout=5, check=False)
-            if pref_result.returncode == 0:
-                try:
-                    decoded = json.loads(pref_result.stdout)
-                    if isinstance(decoded, Mapping):
-                        preferences = decoded
-                except json.JSONDecodeError:
-                    pass
             if not isinstance(status_payload, Mapping):
                 raise TailscaleError("tailscale status returned an unexpected value", kind="protocol")
+            context = self._status_context(status_payload)
+            now = time.monotonic()
+            with self._metadata_lock:
+                metadata_epoch = self._metadata_epoch
+                profile_cache = self._profiles_cache
+                preference_cache = self._preferences_cache
+            profiles: tuple[Profile, ...] = ()
+            preferences: Mapping[str, Any] = {}
+            profile_cache_fresh = (
+                profile_cache
+                and now - profile_cache[0] < self._metadata_ttl
+                and profile_cache[2] == context
+            )
+            if profile_cache_fresh:
+                profiles = profile_cache[1]
+            else:
+                try:
+                    profile_result = self._run(["switch", "--list", "--json"], timeout=5, check=False)
+                    if profile_result.returncode == 0:
+                        profiles = parse_profiles(json.loads(profile_result.stdout))
+                        with self._metadata_lock:
+                            if self._metadata_epoch == metadata_epoch:
+                                self._profiles_cache = (now, profiles, context)
+                except (TailscaleError, json.JSONDecodeError):
+                    pass
+
+            preference_cache_fresh = (
+                preference_cache
+                and now - preference_cache[0] < self._metadata_ttl
+                and preference_cache[2] == context
+            )
+            if preference_cache_fresh:
+                preferences = preference_cache[1]
+            else:
+                try:
+                    pref_result = self._run(["get", "--json", "all"], timeout=5, check=False)
+                    if pref_result.returncode == 0:
+                        decoded = json.loads(pref_result.stdout)
+                        if isinstance(decoded, Mapping):
+                            preferences = decoded
+                            with self._metadata_lock:
+                                if self._metadata_epoch == metadata_epoch:
+                                    self._preferences_cache = (now, preferences, context)
+                except (TailscaleError, json.JSONDecodeError):
+                    pass
             return parse_status(status_payload, profiles=profiles, preferences=preferences)
         except TailscaleError as exc:
             return Snapshot(error=str(exc), error_kind=exc.kind)
@@ -421,10 +530,16 @@ class TailscaleCLI:
         # With no flags, `tailscale up` restores the saved preferences. Passing
         # even the CLI timeout flag makes Tailscale require every non-default
         # setting (exit node, routes, DNS, and so on) to be repeated.
-        self._run(["up"], timeout=25)
+        try:
+            self._run(["up"], timeout=25)
+        finally:
+            self._invalidate_metadata()
 
     def disconnect(self) -> None:
-        self._run(["down"])
+        try:
+            self._run(["down"])
+        finally:
+            self._invalidate_metadata()
 
     def wait_for_daemon(self, timeout: float = 20.0) -> None:
         deadline = time.monotonic() + timeout
@@ -442,34 +557,52 @@ class TailscaleCLI:
         raise TailscaleError(f"tailscaled did not become ready after restart{detail}", kind="daemon")
 
     def full_restart(self, restart_service: Callable[[], None]) -> None:
-        self.disconnect()
+        try:
+            self.disconnect()
+        except TailscaleError as exc:
+            # `down` is allowed to report an already-stopped daemon at the
+            # restart boundary; other failures must remain visible.
+            if exc.kind != "daemon":
+                raise
         restart_service()
         self.wait_for_daemon()
         self.connect()
 
     def set_exit_node(self, target: str) -> None:
-        self._run(["set", f"--exit-node={target}"])
+        try:
+            self._run(["set", f"--exit-node={target}"])
+        finally:
+            self._invalidate_metadata()
 
     def set_preference(self, name: str, enabled: bool) -> None:
         if name not in self.SAFE_BOOLEAN_PREFS:
             raise ValueError(f"Unsupported preference: {name}")
-        self._run(["set", f"--{name}={'true' if enabled else 'false'}"])
+        try:
+            self._run(["set", f"--{name}={'true' if enabled else 'false'}"])
+        finally:
+            self._invalidate_metadata()
 
     def switch_profile(self, profile_id: str) -> None:
         if not profile_id:
             raise ValueError("Profile ID cannot be empty")
-        self._run(["switch", profile_id], timeout=30)
+        try:
+            self._run(["switch", profile_id], timeout=30)
+        finally:
+            self._invalidate_metadata()
 
     def begin_interactive_login(self) -> str:
-        result = self._run(["login", "--timeout=3s"], timeout=7, check=False)
-        text = f"{result.stdout}\n{result.stderr}"
-        matches = LOGIN_URL_RE.findall(text)
-        if matches:
-            return matches[-1].rstrip(".,;)")
-        if result.returncode:
-            detail = (result.stderr or result.stdout).strip()
-            raise TailscaleError(detail or "Could not start sign-in", kind=_classify_error(detail), returncode=result.returncode)
-        return ""
+        try:
+            result = self._run(["login", "--timeout=3s"], timeout=7, check=False)
+            text = f"{result.stdout}\n{result.stderr}"
+            matches = LOGIN_URL_RE.findall(text)
+            if matches:
+                return matches[-1].rstrip(".,;)")
+            if result.returncode:
+                detail = (result.stderr or result.stdout).strip()
+                raise TailscaleError(detail or "Could not start sign-in", kind=_classify_error(detail), returncode=result.returncode)
+            return ""
+        finally:
+            self._invalidate_metadata()
 
     def login_with_auth_key(self, auth_key: str) -> None:
         if not auth_key.startswith("tskey-"):
@@ -485,6 +618,7 @@ class TailscaleCLI:
                 handle.write("\n")
             self._run(["login", f"--auth-key=file:{path}", "--timeout=30s"], timeout=35)
         finally:
+            self._invalidate_metadata()
             path.unlink(missing_ok=True)
 
 

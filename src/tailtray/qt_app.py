@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import time
 from typing import Callable
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
@@ -27,7 +26,6 @@ from PySide6.QtWidgets import (
 )
 
 from .core import (
-    ReconnectPolicy,
     Snapshot,
     TailscaleCLI,
     TailscaleError,
@@ -36,6 +34,7 @@ from .core import (
     privileged_restart_service_command,
     privileged_start_service_command,
 )
+from .controller import OperationControllerMixin
 from .secrets import AuthKeyStore
 from .settings import autostart_enabled, load_settings, save_settings, set_autostart
 from .status_notifier import MenuOnlyStatusNotifier
@@ -79,18 +78,16 @@ class _WorkerBridge(QObject):
     """Marshal Future completions back onto the Qt event-loop thread."""
 
     refresh_finished = Signal(object)
-    action_finished = Signal(str, object, object, object)
-    auto_reconnect_finished = Signal(object)
+    dispatch = Signal(object)
 
 
-class TailTrayQtApp(QObject):
+class TailTrayQtApp(OperationControllerMixin, QObject):
     def __init__(self) -> None:
         super().__init__()
         self.cli = TailscaleCLI()
         self.secrets = AuthKeyStore()
         self.auth_key = self._load_auth_key()
         self.settings = load_settings()
-        self.reconnect_policy = ReconnectPolicy()
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="tailtray")
         self.snapshot = Snapshot()
         self.refresh_running = False
@@ -106,8 +103,8 @@ class TailTrayQtApp(QObject):
 
         self.bridge = _WorkerBridge(self)
         self.bridge.refresh_finished.connect(self._finish_refresh)
-        self.bridge.action_finished.connect(self._finish_action)
-        self.bridge.auto_reconnect_finished.connect(self._finish_auto_reconnect)
+        self.bridge.dispatch.connect(lambda callback: callback())
+        self._init_operation_controller(self.executor, self._dispatch_callback)
 
         self.tray = QSystemTrayIcon(self)
         self.tray.setToolTip("TailTray")
@@ -155,6 +152,21 @@ class TailTrayQtApp(QObject):
         _add_action(menu, "Quit TailTray", self.quit)
         return menu
 
+    def _dispatch_callback(self, callback) -> None:
+        if self.operation_coordinator._shutdown:
+            return
+        try:
+            self.bridge.dispatch.emit(callback)
+        except (RuntimeError, ReferenceError):
+            self.operation_coordinator.shutdown()
+
+    @staticmethod
+    def _save_settings(settings) -> None:
+        save_settings(settings)
+
+    def _schedule_refresh_after_action(self) -> None:
+        QTimer.singleShot(350, self.refresh)
+
     def _set_menu(self, menu: QMenu) -> None:
         """Publish a complete menu tree in one operation.
 
@@ -180,7 +192,7 @@ class TailTrayQtApp(QObject):
             QTimer.singleShot(0, self._apply_pending_menu)
 
     def _apply_pending_menu(self) -> None:
-        if self.menu_open or not self.menu_rebuild_pending:
+        if self.operation_coordinator._shutdown or self.menu_open or not self.menu_rebuild_pending:
             return
         revision = self._menu_revision(self.snapshot)
         self._set_menu(self._build_menu())
@@ -200,12 +212,30 @@ class TailTrayQtApp(QObject):
     def refresh(self) -> None:
         if self.refresh_running:
             return
+        token = self.operation_coordinator.start_refresh()
+        if token is None:
+            return
         self.refresh_running = True
-        future = self.executor.submit(self.cli.snapshot)
-        future.add_done_callback(self.bridge.refresh_finished.emit)
+        try:
+            future = self.executor.submit(self.cli.snapshot)
+        except Exception as exc:
+            future = Future()
+            future.set_exception(exc)
+        future.add_done_callback(lambda completed: self._emit_refresh(token, completed))
 
-    def _finish_refresh(self, future: Future) -> None:
+    def _emit_refresh(self, token, future) -> None:
+        if self.operation_coordinator._shutdown:
+            return
+        try:
+            self.bridge.refresh_finished.emit((token, future))
+        except (RuntimeError, ReferenceError):
+            self.operation_coordinator.shutdown()
+
+    def _finish_refresh(self, payload) -> None:
+        token, future = payload
         self.refresh_running = False
+        if not self.operation_coordinator.accept_refresh(token):
+            return
         try:
             snapshot = future.result()
         except Exception as exc:  # defensive: keep the tray alive
@@ -215,6 +245,7 @@ class TailTrayQtApp(QObject):
         self._update_indicator()
         if next_menu_revision != self.menu_revision:
             if self.menu_open:
+                self._update_open_menu(snapshot)
                 self.menu_rebuild_pending = True
             else:
                 self._set_menu(self._build_menu())
@@ -222,6 +253,37 @@ class TailTrayQtApp(QObject):
                 self.menu_rebuild_pending = False
         self._maybe_auto_login()
         self._maybe_auto_reconnect()
+
+    def _update_open_menu(self, snapshot: Snapshot) -> None:
+        """Keep the exported root stable, but make its visible state safe/current."""
+        if self.menu is None:
+            return
+        actions = self.menu.actions()
+        if actions:
+            actions[0].setText(snapshot.display_status)
+        for action in actions[1:]:
+            if action.text() not in {"Quit TailTray", "Refresh status"} and not action.text().startswith("Devices"):
+                action.setEnabled(False)
+
+    def _set_busy_controls(self) -> None:
+        if self.menu is None:
+            return
+        self.menu.actions()[0].setText(self.display_status)
+        for action in self.menu.actions():
+            if action.text() in {"Connect", "Disconnect", "Sign in…", "Disconnect after current operation"}:
+                action.setText("Disconnect after current operation")
+                action.triggered.disconnect()
+                action.triggered.connect(self.disconnect_tailscale)
+                action.setEnabled(True)
+                continue
+            if action.text() in {"Quit TailTray", "Refresh status"} or action.text().startswith("Devices"):
+                continue
+            if action.menu() is None:
+                action.setEnabled(False)
+            else:
+                for child in action.menu().actions():
+                    if child.text() not in {"Quit TailTray"}:
+                        child.setEnabled(False)
 
     def _set_icon(self, state: str) -> None:
         icon = _tray_icon_directory() / f"{TRAY_ICON_PREFIX}-{state}.png"
@@ -250,7 +312,7 @@ class TailTrayQtApp(QObject):
     def _build_menu(self) -> QMenu:
         snapshot = self.snapshot
         menu = QMenu()
-        _add_action(menu, snapshot.display_status, enabled=False)
+        _add_action(menu, self.display_status, enabled=False)
         if snapshot.hostname or snapshot.ips:
             detail = snapshot.hostname
             if snapshot.ips:
@@ -260,18 +322,24 @@ class TailTrayQtApp(QObject):
             _add_action(menu, f"⚠ {snapshot.health[0]}", enabled=False)
         menu.addSeparator()
 
-        if snapshot.error_kind == "missing":
+        if self.operation_busy:
+            _add_action(menu, "Disconnect after current operation", self.disconnect_tailscale)
+        elif snapshot.error_kind == "missing":
             _add_action(menu, "Open installation guide…", self.open_installation_guide)
         elif snapshot.error_kind == "daemon":
             _add_action(menu, "Start Tailscale service…", self.start_service)
         elif snapshot.error_kind == "permission":
             _add_action(menu, "Grant this user control…", self.grant_operator)
-        elif snapshot.needs_login:
+        elif snapshot.backend_state == "NeedsLogin":
             _add_action(menu, "Sign in…", self.interactive_login)
+        elif snapshot.backend_state == "NeedsMachineAuth":
+            _add_action(menu, "Approve this device…", self.open_admin_console)
         elif snapshot.connected:
-            _add_action(menu, "Disconnect", self.disconnect_tailscale)
+            _add_action(menu, "Disconnect", self.disconnect_tailscale, enabled=not self.operation_busy)
+        elif snapshot.backend_state == "Stopped":
+            _add_action(menu, "Connect", self.connect_tailscale, enabled=not self.operation_busy)
         else:
-            _add_action(menu, "Connect", self.connect_tailscale)
+            _add_action(menu, "Refresh status", self.refresh, enabled=not self.operation_busy)
 
         if snapshot.devices:
             _add_menu(menu, self._devices_menu(snapshot))
@@ -281,13 +349,17 @@ class TailTrayQtApp(QObject):
         menu.addSeparator()
         _add_menu(menu, self._more_menu(snapshot))
         _add_action(menu, "Quit TailTray", self.quit)
+        if self.operation_busy:
+            for action in menu.actions():
+                if action.menu() is not None and not action.text().startswith("Devices"):
+                    action.setEnabled(False)
         return menu
 
     def _more_menu(self, snapshot: Snapshot) -> QMenu:
         menu = QMenu("More")
         if snapshot.profiles:
             _add_menu(menu, self._profiles_menu(snapshot))
-        if snapshot.connected:
+        if snapshot.connected and snapshot.preferences:
             _add_menu(menu, self._preferences_menu(snapshot))
         _add_menu(menu, self._authentication_menu())
         _add_menu(menu, self._maintenance_menu(snapshot))
@@ -356,7 +428,8 @@ class TailTrayQtApp(QObject):
         return menu
 
     def _devices_menu(self, snapshot: Snapshot) -> QMenu:
-        menu = QMenu(f"Devices ({len(snapshot.devices)})")
+        suffix = " · last reported" if snapshot.degraded else ""
+        menu = QMenu(f"Devices ({len(snapshot.devices)}){suffix}")
         for device in snapshot.devices:
             addresses = QMenu(device.label, menu)
             for address in device.ips:
@@ -370,11 +443,7 @@ class TailTrayQtApp(QObject):
         return menu
 
     def _exit_nodes_menu(self, snapshot: Snapshot) -> QMenu:
-        selected = next((node for node in snapshot.exit_nodes if node.selected), None)
-        selected_label = selected.name if selected else "None"
-        if selected is not None and not snapshot.exit_node_active:
-            selected_label += " (unavailable)"
-        menu = QMenu(f"Exit node: {selected_label}")
+        menu = QMenu(snapshot.exit_node_label)
         group = QActionGroup(menu)
         group.setExclusive(True)
 
@@ -430,88 +499,6 @@ class TailTrayQtApp(QObject):
             menu.addAction(action)
         return menu
 
-    def _action(
-        self,
-        description: str,
-        function: Callable[[], None],
-        *,
-        on_success: Callable | None = None,
-        on_complete: Callable[[bool], None] | None = None,
-    ) -> None:
-        future = self.executor.submit(function)
-        future.add_done_callback(
-            lambda completed: self.bridge.action_finished.emit(description, completed, on_success, on_complete)
-        )
-
-    def _finish_action(
-        self,
-        description: str,
-        future: Future,
-        on_success: Callable | None,
-        on_complete: Callable[[bool], None] | None,
-    ) -> None:
-        succeeded = False
-        try:
-            result = future.result()
-            if on_success is not None:
-                on_success(result)
-        except Exception as exc:
-            self.notify("TailTray", f"{description} failed: {exc}")
-        else:
-            succeeded = True
-        if on_complete is not None:
-            on_complete(succeeded)
-        self.menu_revision = None
-        QTimer.singleShot(350, self.refresh)
-
-    def _set_connection_intent(self, want_connected: bool) -> None:
-        self.settings["want_connected"] = want_connected
-        save_settings(self.settings)
-
-    def connect_tailscale(self) -> None:
-        self._set_connection_intent(True)
-        if self.reconnect_policy.in_flight:
-            return
-        self.reconnect_policy.reset()
-        self._start_expected_connection_action("Connecting", self.cli.connect)
-
-    def disconnect_tailscale(self) -> None:
-        self._set_connection_intent(False)
-        self.reconnect_policy.reset()
-        self._action("Disconnecting", self.cli.disconnect)
-
-    def _start_expected_connection_action(self, description: str, function: Callable[[], None]) -> None:
-        if self.reconnect_policy.in_flight:
-            return
-        self.reconnect_policy.in_flight = True
-
-        def complete(success: bool) -> None:
-            self.reconnect_policy.finish(succeeded=success, now=time.monotonic())
-
-        self._action(description, function, on_complete=complete)
-
-    def _maybe_auto_reconnect(self) -> None:
-        if not self.reconnect_policy.should_attempt(
-            self.snapshot,
-            enabled=bool(self.settings.get("automatic_reconnect", True)),
-            want_connected=bool(self.settings.get("want_connected", True)),
-            now=time.monotonic(),
-        ):
-            return
-        future = self.executor.submit(self.cli.connect)
-        future.add_done_callback(self.bridge.auto_reconnect_finished.emit)
-
-    def _finish_auto_reconnect(self, future: Future) -> None:
-        try:
-            future.result()
-        except Exception as exc:
-            delay = self.reconnect_policy.finish(succeeded=False, now=time.monotonic())
-            print(f"tailtray: automatic reconnect failed; retrying in {delay:g}s: {exc}", file=sys.stderr)
-        else:
-            self.reconnect_policy.finish(succeeded=True, now=time.monotonic())
-        self.menu_revision = None
-        QTimer.singleShot(350, self.refresh)
-
     def switch_profile(self, checked: bool, profile_id: str, already_selected: bool) -> None:
         if checked and not already_selected:
             self._action("Account switch", lambda: self.cli.switch_profile(profile_id))
@@ -534,9 +521,7 @@ class TailTrayQtApp(QObject):
     def toggle_automatic_reconnect(self, checked: bool) -> None:
         self.settings["automatic_reconnect"] = checked
         save_settings(self.settings)
-        if not self.reconnect_policy.in_flight:
-            self.reconnect_policy.reset()
-        if checked and not self.reconnect_policy.in_flight:
+        if checked and not self.operation_busy:
             self._maybe_auto_reconnect()
 
     def toggle_autostart(self, checked: bool) -> None:
@@ -563,6 +548,9 @@ class TailTrayQtApp(QObject):
         QDesktopServices.openUrl(QUrl("https://login.tailscale.com/admin/machines"))
 
     def interactive_login(self) -> None:
+        if self.operation_busy:
+            return
+        self._set_connection_intent(True)
         if self.snapshot.auth_url:
             QDesktopServices.openUrl(QUrl(self.snapshot.auth_url))
             return
@@ -573,24 +561,6 @@ class TailTrayQtApp(QObject):
             QDesktopServices.openUrl(QUrl(url))
         else:
             self.notify("TailTray", "No sign-in URL was returned")
-
-    def _maybe_auto_login(self) -> None:
-        snapshot = self.snapshot
-        if not self.settings.get("automatic_login", True) or not snapshot.needs_login:
-            if snapshot.connected:
-                self.login_token = ""
-            return
-        token = f"{snapshot.backend_state}:{snapshot.auth_url}"
-        if self.login_token == token:
-            return
-        self.login_token = token
-        if self.auth_key:
-            auth_key = self.auth_key
-            self._action("Automatic sign-in", lambda: self.cli.login_with_auth_key(auth_key))
-        elif snapshot.auth_url:
-            QDesktopServices.openUrl(QUrl(snapshot.auth_url))
-        else:
-            self._action("Sign-in", self.cli.begin_interactive_login, on_success=self._open_login_url)
 
     def prompt_auth_key(self) -> None:
         dialog = QDialog()
@@ -645,6 +615,8 @@ class TailTrayQtApp(QObject):
         self._privileged_action("Starting Tailscale service", privileged_start_service_command())
 
     def confirm_full_restart(self) -> None:
+        if self.operation_busy:
+            return
         answer = QMessageBox.warning(
             None,
             "Fully restart Tailscale?",
@@ -653,12 +625,8 @@ class TailTrayQtApp(QObject):
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok,
             QMessageBox.StandardButton.Cancel,
         )
-        if answer == QMessageBox.StandardButton.Ok:
+        if answer == QMessageBox.StandardButton.Ok and not self.operation_busy:
             self._set_connection_intent(True)
-            if self.reconnect_policy.in_flight:
-                self.notify("TailTray", "A connection attempt is already running")
-                return
-            self.reconnect_policy.reset()
             self._start_expected_connection_action("Full restart", self._full_restart)
 
     def _full_restart(self) -> None:
@@ -692,6 +660,7 @@ class TailTrayQtApp(QObject):
 
     def quit(self) -> None:
         self.refresh_timer.stop()
+        self._operation_shutdown()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.tray.hide()
         QApplication.instance().quit()
