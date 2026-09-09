@@ -24,6 +24,36 @@ is required after it completes.
 | Poll started before a command changes state | Reject that observation after the operation boundary. |
 | Quit while work is outstanding | Ignore late UI callbacks and do not launch queued work. |
 
+## CLI contract and menu ownership
+
+Verified against installed Tailscale 1.102.3 help on 2026-09-09; recheck when
+changing command construction or supporting a different CLI version.
+
+| Tray action | CLI operation |
+| --- | --- |
+| Connect | Bare `tailscale up`; preserves saved non-default settings. Subprocess timeout, not an `up` flag. |
+| Disconnect | `tailscale down`; does not log out or erase preferences. |
+| Exit node / boolean preference | `tailscale set --flag=value`; works while Stopped, changes only that preference. |
+| Switch saved account | `tailscale switch PROFILE_ID`. |
+| Sign in when NeedsLogin | `tailscale login`; separate from enabling an authenticated node. |
+| Full restart | down → privileged service restart → wait for daemon → up. |
+
+[Official CLI reference](https://tailscale.com/docs/reference/tailscale-cli).
+
+The toolkit-independent menu model derives labels, commands and enablement
+from the same observation and operation state. Qt and GTK reconcile stable
+item keys in place. Root menus and fixed submenus are never replaced; neither
+backend tracks an open/closed latch. In particular, Plasma need not deliver
+a `closed` event for Disconnect to turn into Connect. Programmatic checkbox
+updates do not submit commands; selections remain observed, not optimistic.
+Removed items lose their callbacks before destruction.
+
+Saved `exit-node=auto:any` and the current `ExitNodeStatus.ID` are separate:
+automatic selection without a candidate is not reported as None or active.
+When optional preferences are unavailable their toggles are disabled.
+If neither a saved exit preference nor a resolved node is known, show unknown
+with no selected radio; missing data must not silently mean None.
+
 ## Limits of observation
 
 `Running` means the backend is enabled, not that every destination is reachable.
@@ -42,9 +72,17 @@ Sources:
 
 Use controlled futures and fake CLI responses to exercise ordering and failures
 without changing the developer's active network. Run `make check` for the full
-suite. The private-session D-Bus subprocess exercises repeated activation
-without touching the desktop's session bus. Qt dependencies must be installed
-in CI so these tests run instead of being skipped.
+suite. `TAILTRAY_TEST_NATIVE_MENU=1 make check` additionally tests the actual
+Qt `/MenuBar` exporter (five Disconnect/Connect cycles with stable item IDs
+and no close events) and native GTK widgets. The earlier activation-only probe
+remains a separate regression check. Both use a private session bus and fake
+CLI responses, never the desktop's session bus or a live down/up cycle. A
+graphical display and dependencies must be present for native checks.
+
+The new no-close controller regression fails against commit c69978f with
+`'Disconnect after current operation' != 'Connect'` and passes with the
+stable-item renderer. This is evidence for the missing-Connect fix, not a
+claim that all possible network failures have been simulated.
 
 Real suspend/resume, Wi-Fi loss and Plasma interactions remain desktop
 integration checks; unit tests do not establish that every network outage

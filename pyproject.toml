@@ -50,3 +50,4 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ruff.lint.per-file-ignores]
 # PyGObject versions must be declared before importing gi.repository.
 "src/tailtray/app.py" = ["E402"]
+"src/tailtray/gtk_menu.py" = ["E402"]

@@ -102,7 +102,8 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(unknown.self_online)
         self.assertEqual(unknown.exit_node_state, "unknown")
 
-        self.assertEqual(Snapshot(backend_state="Running").exit_node_state, "none")
+        self.assertEqual(Snapshot(backend_state="Running").exit_node_state, "unknown")
+        self.assertEqual(Snapshot(backend_state="Running", preferences={"exit-node": ""}).exit_node_state, "none")
         errored = Snapshot(backend_state="Running", exit_node_id="node-1", error_kind="daemon")
         self.assertFalse(errored.connected)
         self.assertEqual(errored.exit_node_state, "inactive")

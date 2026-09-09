@@ -9,6 +9,8 @@ import sys
 from typing import Callable, Any
 
 from .core import ReconnectPolicy
+from .menu import build_menu, Entry
+from .settings import autostart_enabled
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,12 +142,54 @@ class OperationControllerMixin:
             return "Disconnect queued — waiting for current operation…"
         if state.busy:
             return f"{state.name}…"
+        if self.operation_coordinator.mutation_epoch and not self.operation_coordinator.observation_current:
+            return "Updating status…"
         return self.snapshot.display_status
+
+    def _menu_entries(self) -> tuple[Entry, ...]:
+        return build_menu(self.snapshot, status=self.display_status, busy=self.operation_busy,
+                          operation=self.operation_coordinator.state.name, settings=self.settings,
+                          secrets_available=self.secrets.available, has_key=bool(self.auth_key),
+                          autostart=autostart_enabled(), current=self.operation_coordinator.observation_current)
+
+    def _menu_activate(self, entry: Entry, checked: bool = False) -> None:
+        if not entry.enabled:
+            return
+        try:
+            command, args = entry.command, entry.args
+            if command in {"profile", "exit-node"}:
+                if not entry.checked:
+                    if command == "profile":
+                        self._action("Account switch", lambda: self.cli.switch_profile(args[0]))
+                    else:
+                        self._action("Exit node change", lambda: self.cli.set_exit_node(args[0]))
+            elif command == "preference":
+                self._action("Preference change", lambda: self.cli.set_preference(args[0], checked))
+            elif command == "copy":
+                self.copy_address(*args)
+            else:
+                callbacks = {
+                    "connect": self.connect_tailscale, "disconnect": self.disconnect_tailscale,
+                    "refresh": self.refresh, "quit": self.quit, "admin": self.open_admin_console,
+                    "installation": self.open_installation_guide, "login": self.interactive_login,
+                    "full-restart": self.confirm_full_restart, "start-service": self.start_service,
+                    "grant-operator": self.grant_operator, "auth-key": self.prompt_auth_key,
+                    "forget-key": self.forget_auth_key,
+                    "auto-login": lambda: self.toggle_automatic_login(checked),
+                    "auto-reconnect": lambda: self.toggle_automatic_reconnect(checked),
+                    "autostart": lambda: self.toggle_autostart(checked),
+                }
+                callbacks[command]()
+        except Exception as exc:
+            self.notify("TailTray", f"Action failed: {exc}")
+        finally:
+            if not self.operation_coordinator._shutdown:
+                self._render_menu()
 
     def _action(self, description: str, function: Callable[[], Any], *, on_success: Callable | None = None) -> bool:
         started = self.operation_coordinator.submit(description, function, on_success=on_success)
-        if self.operation_busy and hasattr(self, "_set_busy_controls"):
-            self._set_busy_controls()
+        if hasattr(self, "_render_menu"):
+            self._render_menu()
         return started
 
     def _operation_finished(self, description: str, succeeded: bool, result: Any, error: Exception | None) -> None:
@@ -157,7 +201,8 @@ class OperationControllerMixin:
             self.reconnect_policy.finish(succeeded=succeeded, now=time.monotonic())
         if description == "Account switch" and succeeded:
             self.login_token = ""
-        self.menu_revision = None
+        if hasattr(self, "_render_menu"):
+            self._render_menu()
         self._schedule_refresh_after_action()
 
     def _set_connection_intent(self, want_connected: bool) -> None:
@@ -179,8 +224,8 @@ class OperationControllerMixin:
         if not self.operation_busy:
             self.reconnect_policy.reset()
         self.operation_coordinator.request_disconnect(self.cli.disconnect)
-        if self.operation_busy and hasattr(self, "_set_busy_controls"):
-            self._set_busy_controls()
+        if hasattr(self, "_render_menu"):
+            self._render_menu()
 
     def _start_expected_connection_action(self, description: str, function: Callable[[], Any]) -> None:
         self._action(description, function)

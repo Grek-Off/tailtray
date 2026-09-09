@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from typing import Callable
 import webbrowser
 
 import gi
@@ -23,14 +22,14 @@ from .core import (
     Snapshot,
     TailscaleCLI,
     TailscaleError,
-    preference_value,
     privileged_operator_command,
     privileged_restart_service_command,
     privileged_start_service_command,
 )
 from .controller import OperationControllerMixin
 from .secrets import AuthKeyStore
-from .settings import autostart_enabled, load_settings, save_settings, set_autostart
+from .settings import load_settings, save_settings, set_autostart
+from .gtk_menu import GtkMenu
 
 
 APP_ID = "io.github.tailtray"
@@ -46,21 +45,6 @@ def _tray_icon_directory() -> Path:
     return Path("/usr/share/tailtray/icons")
 
 
-def _menu_item(label: str, callback: Callable | None = None, *, sensitive: bool = True) -> Gtk.MenuItem:
-    item = Gtk.MenuItem.new_with_label(label)
-    item.set_sensitive(sensitive)
-    if callback is not None:
-        item._activation_handler = item.connect("activate", callback)
-    item.show()
-    return item
-
-
-def _separator() -> Gtk.SeparatorMenuItem:
-    item = Gtk.SeparatorMenuItem()
-    item.show()
-    return item
-
-
 class TailTrayApp(OperationControllerMixin):
     def __init__(self) -> None:
         self.cli = TailscaleCLI()
@@ -72,9 +56,6 @@ class TailTrayApp(OperationControllerMixin):
         self.refresh_running = False
         self.login_token = ""
         self.menu: Gtk.Menu | None = None
-        self.menu_open = False
-        self.menu_rebuild_pending = False
-        self.menu_revision: tuple[object, ...] | None = None
         self.indicator_revision: tuple[str, str] | None = None
         self.lock_handle = self._acquire_singleton_lock()
         self._init_operation_controller(self.executor, lambda callback: GLib.idle_add(callback))
@@ -89,7 +70,10 @@ class TailTrayApp(OperationControllerMixin):
             self.indicator.set_icon_theme_path(str(tray_icons))
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator.set_title("TailTray")
-        self._set_menu(self._loading_menu())
+        self.menu_renderer = GtkMenu(self._menu_activate)
+        self.menu = self.menu_renderer.menu
+        self._render_menu()
+        self.indicator.set_menu(self.menu)
 
         GLib.timeout_add_seconds(REFRESH_SECONDS, self._refresh_timer)
         self.refresh()
@@ -124,48 +108,9 @@ class TailTrayApp(OperationControllerMixin):
         except Exception:
             return ""
 
-    def _loading_menu(self) -> Gtk.Menu:
-        menu = Gtk.Menu()
-        menu.append(_menu_item("Loading Tailscale…", sensitive=False))
-        menu.append(_separator())
-        menu.append(_menu_item("Quit TailTray", self.quit))
-        menu.show_all()
-        return menu
-
-    def _set_menu(self, menu: Gtk.Menu) -> None:
-        # Keep the exported GTK tree stable. Replacing it repeatedly makes KDE
-        # invalidate DBusMenu item IDs while the pointer is inside a submenu.
-        self.menu = menu
-        menu.connect("show", self._menu_opened)
-        menu.connect("hide", self._menu_closed)
-        menu.connect("deactivate", self._menu_closed)
-        self.indicator.set_menu(self.menu)
-
-    def _menu_opened(self, *_args) -> None:
-        self.menu_open = True
-
-    def _menu_closed(self, *_args) -> None:
-        self.menu_open = False
-        if self.menu_rebuild_pending:
-            GLib.idle_add(self._apply_pending_menu)
-
-    def _apply_pending_menu(self) -> bool:
-        if self.operation_coordinator._shutdown or self.menu_open or not self.menu_rebuild_pending:
-            return GLib.SOURCE_REMOVE
-        self._set_menu(self._build_menu())
-        self.menu_revision = self._menu_revision(self.snapshot)
-        self.menu_rebuild_pending = False
-        return GLib.SOURCE_REMOVE
-
-    def _menu_revision(self, snapshot: Snapshot) -> tuple[object, ...]:
-        return (
-            snapshot,
-            self.secrets.available,
-            bool(self.auth_key),
-            bool(self.settings.get("automatic_login", True)),
-            bool(self.settings.get("automatic_reconnect", True)),
-            autostart_enabled(),
-        )
+    def _render_menu(self) -> None:
+        if not self.operation_coordinator._shutdown:
+            self.menu_renderer.update(self._menu_entries())
 
     def _refresh_timer(self) -> bool:
         self.refresh()
@@ -193,46 +138,11 @@ class TailTrayApp(OperationControllerMixin):
             snapshot = future.result()
         except Exception as exc:  # defensive: keep the tray alive
             snapshot = Snapshot(error=str(exc), error_kind="command")
-        next_menu_revision = self._menu_revision(snapshot)
         self.snapshot = snapshot
         self._update_indicator()
-        if next_menu_revision != self.menu_revision:
-            if self.menu_open:
-                self._update_open_menu(snapshot)
-                self.menu_rebuild_pending = True
-            else:
-                self._set_menu(self._build_menu())
-                self.menu_revision = next_menu_revision
-                self.menu_rebuild_pending = False
+        self._render_menu()
         self._maybe_auto_login()
         self._maybe_auto_reconnect()
-
-    def _update_open_menu(self, snapshot: Snapshot) -> None:
-        # Update the headline without invalidating the currently exported tree.
-        items = self.menu.get_children() if self.menu is not None else []
-        if items and hasattr(items[0], "set_label"):
-            items[0].set_label(snapshot.display_status)
-        for item in items[1:]:
-            label = item.get_label() if hasattr(item, "get_label") else ""
-            if label not in {"Quit TailTray", "Refresh status"} and not label.startswith("Devices"):
-                item.set_sensitive(False)
-
-    def _set_busy_controls(self) -> None:
-        if self.menu is None:
-            return
-        self.menu.get_children()[0].set_label(self.display_status)
-        for item in self.menu.get_children():
-            label = item.get_label() if hasattr(item, "get_label") else ""
-            if label in {"Connect", "Disconnect", "Sign in…", "Disconnect after current operation"}:
-                item.set_label("Disconnect after current operation")
-                if hasattr(item, "_activation_handler"):
-                    item.disconnect(item._activation_handler)
-                item._activation_handler = item.connect("activate", self.disconnect_tailscale)
-                item.set_sensitive(True)
-                continue
-            if label not in {"Quit TailTray", "Refresh status"} and not label.startswith("Devices"):
-                item.set_sensitive(False)
-        return GLib.SOURCE_REMOVE
 
     def _update_indicator(self) -> None:
         snapshot = self.snapshot
@@ -252,233 +162,26 @@ class TailTrayApp(OperationControllerMixin):
         self.indicator.set_title(snapshot.display_status)
         self.indicator_revision = revision
 
-    def _build_menu(self) -> Gtk.Menu:
-        snapshot = self.snapshot
-        menu = Gtk.Menu()
-        menu.append(_menu_item(self.display_status, sensitive=False))
-        if snapshot.hostname or snapshot.ips:
-            detail = snapshot.hostname
-            if snapshot.ips:
-                detail += f"  ·  {snapshot.ips[0]}" if detail else snapshot.ips[0]
-            menu.append(_menu_item(detail, self.copy_ip if snapshot.ips else None, sensitive=bool(snapshot.ips)))
-        if snapshot.health:
-            menu.append(_menu_item(f"⚠ {snapshot.health[0]}", sensitive=False))
-        menu.append(_separator())
-
-        if self.operation_busy:
-            menu.append(_menu_item("Disconnect after current operation", self.disconnect_tailscale))
-        elif snapshot.error_kind == "missing":
-            menu.append(_menu_item("Open installation guide…", lambda *_: webbrowser.open("https://tailscale.com/download/linux")))
-        elif snapshot.error_kind == "daemon":
-            menu.append(_menu_item("Start Tailscale service…", self.start_service))
-        elif snapshot.error_kind == "permission":
-            menu.append(_menu_item("Grant this user control…", self.grant_operator))
-        elif snapshot.backend_state == "NeedsLogin":
-            menu.append(_menu_item("Sign in…", self.interactive_login))
-        elif snapshot.backend_state == "NeedsMachineAuth":
-            menu.append(_menu_item("Approve this device…", self.open_admin_console))
-        elif snapshot.connected:
-            menu.append(_menu_item("Disconnect", self.disconnect_tailscale, sensitive=not self.operation_busy))
-        elif snapshot.backend_state == "Stopped":
-            menu.append(_menu_item("Connect", self.connect_tailscale, sensitive=not self.operation_busy))
-        else:
-            menu.append(_menu_item("Refresh status", self.refresh, sensitive=not self.operation_busy))
-
-        if snapshot.devices:
-            menu.append(self._devices_item(snapshot))
-        if snapshot.connected:
-            menu.append(self._exit_nodes_item(snapshot))
-
-        menu.append(_separator())
-        menu.append(self._more_item(snapshot))
-        menu.append(_menu_item("Quit TailTray", self.quit))
-        menu.show_all()
-        return menu
-
-    def _more_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
-        root = _menu_item("More")
-        submenu = Gtk.Menu()
-        if snapshot.profiles:
-            submenu.append(self._profiles_item(snapshot))
-        if snapshot.connected and snapshot.preferences:
-            submenu.append(self._preferences_item(snapshot))
-        submenu.append(self._authentication_item())
-        submenu.append(self._maintenance_item(snapshot))
-        submenu.append(self._application_item())
-        root.set_submenu(submenu)
-        return root
-
-    def _authentication_item(self) -> Gtk.MenuItem:
-        root = _menu_item("Authentication")
-        submenu = Gtk.Menu()
-        submenu.append(
-            _menu_item(
-                "Tailscale admin console…",
-                lambda *_: webbrowser.open("https://login.tailscale.com/admin/machines"),
-            )
-        )
-        if self.secrets.available:
-            submenu.append(_separator())
-            if self.auth_key:
-                submenu.append(_menu_item("Replace automatic sign-in key…", self.prompt_auth_key))
-                submenu.append(_menu_item("Forget automatic sign-in key", self.forget_auth_key))
-            else:
-                submenu.append(_menu_item("Set up automatic sign-in…", self.prompt_auth_key))
-
-        automatic = Gtk.CheckMenuItem.new_with_label("Sign in automatically when required")
-        automatic.set_active(bool(self.settings.get("automatic_login", True)))
-        automatic.connect("toggled", self.toggle_automatic_login)
-        automatic.show()
-        submenu.append(automatic)
-        root.set_submenu(submenu)
-        return root
-
-    def _maintenance_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
-        root = _menu_item("Maintenance")
-        submenu = Gtk.Menu()
-        if not snapshot.error_kind and not snapshot.needs_login:
-            submenu.append(_menu_item("Full restart…", self.confirm_full_restart))
-        submenu.append(_menu_item("Refresh status", self.refresh))
-        if snapshot.version:
-            submenu.append(_separator())
-            submenu.append(_menu_item(f"Tailscale {snapshot.version}", sensitive=False))
-        root.set_submenu(submenu)
-        return root
-
-    def _application_item(self) -> Gtk.MenuItem:
-        root = _menu_item("Application")
-        submenu = Gtk.Menu()
-        reconnect = Gtk.CheckMenuItem.new_with_label("Reconnect after unexpected disconnects")
-        reconnect.set_active(bool(self.settings.get("automatic_reconnect", True)))
-        reconnect.connect("toggled", self.toggle_automatic_reconnect)
-        reconnect.show()
-        submenu.append(reconnect)
-        submenu.append(_separator())
-        startup = Gtk.CheckMenuItem.new_with_label("Start TailTray on login")
-        startup.set_active(autostart_enabled())
-        startup.connect("toggled", self.toggle_autostart)
-        startup.show()
-        submenu.append(startup)
-        root.set_submenu(submenu)
-        return root
-
-    def _profiles_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
-        selected = next((profile for profile in snapshot.profiles if profile.selected), None)
-        root = _menu_item(f"Account: {selected.label if selected else 'select'}")
-        submenu = Gtk.Menu()
-        group = None
-        for profile in snapshot.profiles:
-            radio = Gtk.RadioMenuItem.new_with_label_from_widget(group, profile.label)
-            group = group or radio
-            radio.set_active(profile.selected)
-            radio.connect("activate", self.switch_profile, profile.id, profile.selected)
-            radio.show()
-            submenu.append(radio)
-        root.set_submenu(submenu)
-        return root
-
-    def _devices_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
-        suffix = " · last reported" if snapshot.degraded else ""
-        root = _menu_item(f"Devices ({len(snapshot.devices)}){suffix}")
-        submenu = Gtk.Menu()
-        for device in snapshot.devices:
-            device_item = _menu_item(device.label, sensitive=bool(device.ips))
-            if device.ips:
-                addresses = Gtk.Menu()
-                for address in device.ips:
-                    addresses.append(
-                        _menu_item(address, lambda _item, ip=address, name=device.name: self.copy_address(ip, name))
-                    )
-                device_item.set_submenu(addresses)
-            submenu.append(device_item)
-        root.set_submenu(submenu)
-        return root
-
-    def _exit_nodes_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
-        root = _menu_item(snapshot.exit_node_label)
-        submenu = Gtk.Menu()
-        group = None
-
-        none = Gtk.RadioMenuItem.new_with_label_from_widget(group, "None")
-        group = none
-        none.set_active(not snapshot.exit_node_id)
-        none.connect("activate", self.select_exit_node, "", not snapshot.exit_node_id)
-        none.show()
-        submenu.append(none)
-
-        automatic = Gtk.RadioMenuItem.new_with_label_from_widget(group, "Automatic (best available)")
-        automatic.set_active(False)
-        automatic.connect("activate", self.select_exit_node, "auto:any", False)
-        automatic.show()
-        submenu.append(automatic)
-        submenu.append(_separator())
-
-        if not snapshot.exit_nodes:
-            submenu.append(_menu_item("No exit nodes available", sensitive=False))
-        for node in snapshot.exit_nodes:
-            radio = Gtk.RadioMenuItem.new_with_label_from_widget(group, node.label)
-            radio.set_active(node.selected)
-            radio.set_sensitive(node.online)
-            radio.connect("activate", self.select_exit_node, node.target, node.selected)
-            radio.show()
-            submenu.append(radio)
-        root.set_submenu(submenu)
-        return root
-
-    def _preferences_item(self, snapshot: Snapshot) -> Gtk.MenuItem:
-        root = _menu_item("Preferences")
-        submenu = Gtk.Menu()
-        options = (
-            ("accept-dns", "Use Tailscale DNS", True),
-            ("accept-routes", "Accept subnet routes", False),
-            ("exit-node-allow-lan-access", "Allow LAN with exit node", False),
-            ("shields-up", "Block incoming connections", False),
-            ("update-check", "Check for Tailscale updates", True),
-        )
-        for name, label, default in options:
-            item = Gtk.CheckMenuItem.new_with_label(label)
-            current = preference_value(snapshot.preferences, name, default)
-            item.set_active(current)
-            item.connect("toggled", self.toggle_preference, name, current)
-            item.show()
-            submenu.append(item)
-        root.set_submenu(submenu)
-        return root
-
     def _refresh_once(self) -> bool:
         self.refresh()
         return GLib.SOURCE_REMOVE
 
-    def switch_profile(self, item: Gtk.RadioMenuItem, profile_id: str, already_selected: bool) -> None:
-        if item.get_active() and not already_selected:
-            self._action("Account switch", lambda: self.cli.switch_profile(profile_id))
-
-    def select_exit_node(self, item: Gtk.RadioMenuItem, target: str, already_selected: bool) -> None:
-        if item.get_active() and not already_selected:
-            self._action("Exit node change", lambda: self.cli.set_exit_node(target))
-
-    def toggle_preference(self, item: Gtk.CheckMenuItem, name: str, old_value: bool) -> None:
-        value = item.get_active()
-        if value != old_value:
-            self._action("Preference change", lambda: self.cli.set_preference(name, value))
-
-    def toggle_automatic_login(self, item: Gtk.CheckMenuItem) -> None:
-        self.settings["automatic_login"] = item.get_active()
+    def toggle_automatic_login(self, checked: bool) -> None:
+        self.settings["automatic_login"] = checked
         save_settings(self.settings)
-        if item.get_active():
+        if checked:
             self.login_token = ""
             self._maybe_auto_login()
 
-    def toggle_automatic_reconnect(self, item: Gtk.CheckMenuItem) -> None:
-        enabled = item.get_active()
+    def toggle_automatic_reconnect(self, enabled: bool) -> None:
         self.settings["automatic_reconnect"] = enabled
         save_settings(self.settings)
         if enabled and not self.operation_busy:
             self._maybe_auto_reconnect()
 
-    def toggle_autostart(self, item: Gtk.CheckMenuItem) -> None:
+    def toggle_autostart(self, checked: bool) -> None:
         try:
-            set_autostart(item.get_active())
+            set_autostart(checked)
         except Exception as exc:
             self.notify("TailTray", f"Could not change autostart: {exc}")
 
@@ -499,6 +202,10 @@ class TailTrayApp(OperationControllerMixin):
             webbrowser.open(self.snapshot.auth_url)
             return
         self._action("Sign-in", self.cli.begin_interactive_login, on_success=self._open_login_url)
+
+    @staticmethod
+    def open_installation_guide() -> None:
+        webbrowser.open("https://tailscale.com/download/linux")
 
     @staticmethod
     def open_admin_console(*_args) -> None:
@@ -562,7 +269,7 @@ class TailTrayApp(OperationControllerMixin):
         self._privileged_action("Starting Tailscale service", privileged_start_service_command())
 
     def confirm_full_restart(self, *_args) -> None:
-        if self.operation_busy:
+        if not self.operation_coordinator.observation_current:
             return
         dialog = Gtk.MessageDialog(
             transient_for=None,
@@ -578,7 +285,7 @@ class TailTrayApp(OperationControllerMixin):
         dialog.add_button("Restart", Gtk.ResponseType.OK)
         response = dialog.run()
         dialog.destroy()
-        if response == Gtk.ResponseType.OK and not self.operation_busy:
+        if response == Gtk.ResponseType.OK and self.operation_coordinator.observation_current:
             self._set_connection_intent(True)
             self._start_expected_connection_action("Full restart", self._full_restart)
 

@@ -12,28 +12,24 @@ except (ImportError, ValueError):
 
 @unittest.skipUnless(TailTrayApp, "GTK/AppIndicator not installed")
 class GtkStateTests(unittest.TestCase):
-    def test_open_menu_defers_replacement_until_closed(self):
+    def test_refresh_updates_connection_without_menu_close_event(self):
         controller = TailTrayApp.__new__(TailTrayApp)
         controller._init_operation_controller(Mock(), lambda callback: callback())
-        controller.menu_open = True
-        controller.menu_rebuild_pending = False
-        controller.menu_revision = None
-        controller._menu_revision = lambda snapshot: (snapshot,)
+        controller.settings = {}
+        controller.secrets = Mock(available=False)
+        controller.auth_key = ""
+        controller.menu_renderer = Mock()
         controller._update_indicator = Mock()
-        controller._update_open_menu = Mock()
-        controller._set_menu = Mock()
-        controller._build_menu = Mock()
         controller._maybe_auto_login = Mock()
         controller._maybe_auto_reconnect = Mock()
         token = controller.operation_coordinator.start_refresh()
         future = Future()
         stopped = Snapshot(backend_state="Stopped")
         future.set_result(stopped)
-        controller._finish_refresh(token, future)
-        controller._set_menu.assert_not_called()
-        controller._update_open_menu.assert_called_once_with(stopped)
-        with patch("tailtray.app.GLib.idle_add"):
-            controller._menu_closed()
-        controller._apply_pending_menu()
-        controller._set_menu.assert_called_once()
-        self.assertFalse(controller.menu_rebuild_pending)
+        with patch("tailtray.controller.autostart_enabled", return_value=False):
+            controller._finish_refresh(token, future)
+        entries = controller.menu_renderer.update.call_args.args[0]
+        connection = next(e for e in entries if e.key == "connection")
+        self.assertEqual(connection.label, "Connect")
+        self.assertEqual(connection.command, "connect")
+        self.assertTrue(connection.enabled)

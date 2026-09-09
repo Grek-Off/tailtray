@@ -6,23 +6,17 @@ import unittest
 from unittest.mock import Mock, patch
 
 from tailtray.core import Device, ExitNode, ReconnectPolicy, Snapshot
+from tailtray.menu import Entry, build_menu
 
 
 try:
     from PySide6.QtWidgets import QApplication
 
     from tailtray.qt_app import TailTrayQtApp
+    from tailtray.qt_menu import QtMenu
 except ImportError:
     QApplication = None
     TailTrayQtApp = None
-
-
-class _MenuCallbacks:
-    def copy_address(self, address, name):
-        self.copied = (address, name)
-
-    def select_exit_node(self, checked, target, already_selected):
-        self.selected = (checked, target, already_selected)
 
 
 class QtTraySafetyTests(unittest.TestCase):
@@ -57,6 +51,14 @@ class QtMenuTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         cls.application = QApplication.instance() or QApplication([])
 
+    def render(self, snapshot):
+        renderer = QtMenu(Mock())
+        renderer.update(build_menu(snapshot, status=snapshot.display_status, busy=False,
+                                   operation=None, settings={}, secrets_available=False,
+                                   has_key=False, autostart=False))
+        self.addCleanup(renderer.menu.deleteLater)
+        return renderer.menu
+
     def test_device_submenus_are_eager_and_owned_by_root(self):
         snapshot = Snapshot(
             devices=(
@@ -64,7 +66,8 @@ class QtMenuTests(unittest.TestCase):
                 Device(id="two", name="phone", ips=("100.64.0.2",), online=False),
             )
         )
-        menu = TailTrayQtApp._devices_menu(_MenuCallbacks(), snapshot)
+        root = self.render(snapshot)
+        menu = next(a.menu() for a in root.actions() if a.objectName() == "devices")
 
         self.assertEqual(len(menu.actions()), 2)
         for action in menu.actions():
@@ -90,9 +93,36 @@ class QtMenuTests(unittest.TestCase):
             ),
         )
 
-        menu = TailTrayQtApp._exit_nodes_menu(_MenuCallbacks(), snapshot)
+        root = self.render(snapshot)
+        menu = next(a.menu() for a in root.actions() if a.objectName() == "exit-nodes")
 
         self.assertEqual(menu.title(), "Exit node: exit-box (unavailable)")
+
+    def test_in_place_updates_change_callback_data_without_recreating_submenu(self):
+        activate = Mock()
+        renderer = QtMenu(activate)
+        self.addCleanup(renderer.menu.deleteLater)
+        renderer.update((Entry("devices", "Devices", children=(Entry("ip", "old", "copy", ("old",)),)),))
+        submenu = renderer.menu.actions()[0].menu()
+        action = submenu.actions()[0]
+        renderer.update((Entry("devices", "Devices", children=(Entry("ip", "new", "copy", ("new",)),)),))
+        self.assertIs(renderer.menu.actions()[0].menu(), submenu)
+        self.assertIs(submenu.actions()[0], action)
+        action.trigger()
+        self.assertEqual(activate.call_args.args[0].args, ("new",))
+
+    def test_programmatic_checkbox_updates_and_removed_actions_never_dispatch(self):
+        activate = Mock()
+        renderer = QtMenu(activate)
+        self.addCleanup(renderer.menu.deleteLater)
+        renderer.update((Entry("pref", "DNS", "preference", checked=False),))
+        action = renderer.menu.actions()[0]
+        renderer.update((Entry("pref", "DNS", "preference", checked=True),))
+        self.assertTrue(action.isChecked())
+        activate.assert_not_called()
+        renderer.update(())
+        action.trigger()
+        activate.assert_not_called()
 
     def test_manual_disconnect_disables_reconnect_intent(self):
         controller = TailTrayQtApp.__new__(TailTrayQtApp)
@@ -100,7 +130,7 @@ class QtMenuTests(unittest.TestCase):
         controller.reconnect_policy = ReconnectPolicy(failures=2, next_attempt_at=30, in_flight=False)
         controller.cli = Mock()
         controller.operation_coordinator = Mock(busy=False)
-        controller._set_busy_controls = Mock()
+        controller._render_menu = Mock()
 
         with patch("tailtray.qt_app.save_settings") as save:
             controller.disconnect_tailscale()
@@ -137,7 +167,7 @@ class QtMenuTests(unittest.TestCase):
         controller.executor.submit.return_value = pending
         controller.bridge = Mock()
         controller._init_operation_controller(controller.executor, lambda callback: callback())
-        controller._set_busy_controls = Mock()
+        controller._render_menu = Mock()
         controller.operation_coordinator.accept_refresh(controller.operation_coordinator.start_refresh())
 
         with patch("tailtray.controller.time.monotonic", return_value=10):

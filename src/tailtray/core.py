@@ -118,12 +118,28 @@ class Snapshot:
         return self.connected and (bool(self.health) or self.self_online is False)
 
     @property
+    def configured_exit_node(self) -> str | None:
+        """Saved preference, distinct from the currently resolved/online node.
+
+        None means the optional preference read is unavailable; an empty string
+        means exit-node routing is explicitly disabled.
+        """
+        value = self.preferences.get("exit-node")
+        if isinstance(value, Mapping):
+            value = value.get("value")
+        return value if isinstance(value, str) else None
+
+    @property
     def exit_node_state(self) -> str:
         """UI state for the configured exit node's availability."""
-        if not self.exit_node_id:
+        if not self.exit_node_id and self.configured_exit_node is None:
+            return "unknown"
+        if not self.exit_node_id and not self.configured_exit_node:
             return "none"
         if not self.connected:
             return "inactive"
+        if not self.exit_node_id:
+            return "unknown"
         if (
             self.health
             or self.self_online is False
@@ -139,8 +155,12 @@ class Snapshot:
 
     @property
     def exit_node_label(self) -> str:
+        if not self.exit_node_id and self.configured_exit_node is None:
+            return "Exit node: unknown"
         selected = next((node for node in self.exit_nodes if node.id == self.exit_node_id), None)
-        name = selected.name if selected else self.exit_node_id or "None"
+        name = selected.name if selected else self.exit_node_id or self.configured_exit_node or "None"
+        if self.configured_exit_node == "auto:any":
+            name = f"Automatic → {name}" if self.exit_node_id else "Automatic"
         suffix = {
             "unknown": " (availability unknown)",
             "unavailable": " (unavailable)",
