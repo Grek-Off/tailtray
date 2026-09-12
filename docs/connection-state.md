@@ -11,7 +11,8 @@ is required after it completes.
 | Situation | Presentation and action |
 | --- | --- |
 | Running, healthy | Normal connected state; selected exit node must also report online. |
-| Running with health warnings or local node offline | Degraded/uncertain availability; keep Disconnect available. Do not cycle down/up. |
+| Running with health warnings | Degraded/uncertain availability; keep Disconnect available. Do not cycle down/up. |
+| Running with Self.Online false or absent, no health warnings | Keep connected presentation; use ExitNodeStatus for reported exit-node availability. |
 | Stopped, user wants connection | One automatic up attempt with bounded retry delay. |
 | Manual Disconnect | Persist disconnected intent; automatic up and login must not undo it. |
 | Disconnect during an outstanding command | Record intent immediately, execute down after that command finishes. |
@@ -58,12 +59,16 @@ with no selected radio; missing data must not silently mean None.
 
 `Running` means the backend is enabled, not that every destination is reachable.
 `ExitNodeStatus.Online` is the daemon's report that the node is alive; it is not
-an end-to-end Internet probe. Health warnings or loss of control-plane contact
-make availability uncertain. Existing peer tunnels can survive a coordination
+an end-to-end Internet probe. Health warnings make availability uncertain.
+`Self.Online` reflects `GetInPollNetMap()`, not tunnel connectivity; false or
+missing values alone must not mark the device offline or invalidate explicit
+exit-node status. The local device marker follows `BackendState == Running`.
+Existing peer tunnels can survive a coordination
 server outage, so forcefully restarting them would be counterproductive.
 
 Sources:
 
+- [Tailscale 1.102.3 self-status implementation](https://github.com/tailscale/tailscale/blob/v1.102.3/ipn/ipnlocal/local.go) (checked 2026-09-12; recheck if status semantics change)
 - [Tailscale status structure](https://github.com/tailscale/tailscale/blob/main/ipn/ipnstate/ipnstate.go)
 - [Coordination server outages](https://tailscale.com/docs/reference/coordination-server-down)
 - [Out-of-sync health warning](https://tailscale.com/docs/reference/messages/client/not-in-map-poll)

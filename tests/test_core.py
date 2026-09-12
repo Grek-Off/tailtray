@@ -78,7 +78,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("exit node unavailable", exit_node_offline.display_status)
         self.assertEqual(exit_node_offline.exit_node_state, "unavailable")
 
-    def test_running_status_can_be_degraded_or_self_offline(self):
+    def test_running_status_uses_health_not_self_control_poll(self):
         unhealthy_payload = json.loads(json.dumps(STATUS))
         unhealthy_payload["Health"] = ["derp connection unavailable"]
         unhealthy = parse_status(unhealthy_payload)
@@ -90,17 +90,18 @@ class CoreTests(unittest.TestCase):
         offline_payload["Self"]["Online"] = False
         offline = parse_status(offline_payload)
         self.assertTrue(offline.connected)
-        self.assertFalse(offline.devices[0].online)
-        self.assertFalse(offline.exit_node_active)
-        self.assertIn("device offline", offline.display_status)
-        self.assertTrue(offline.degraded)
-        self.assertEqual(offline.exit_node_state, "unknown")
+        self.assertFalse(offline.self_online)
+        self.assertTrue(offline.devices[0].online)
+        self.assertTrue(offline.exit_node_active)
+        self.assertTrue(offline.display_status.startswith("Connected"))
+        self.assertFalse(offline.degraded)
+        self.assertEqual(offline.exit_node_state, "active")
 
         missing_online = json.loads(json.dumps(STATUS))
         del missing_online["Self"]["Online"]
         unknown = parse_status(missing_online)
         self.assertIsNone(unknown.self_online)
-        self.assertEqual(unknown.exit_node_state, "unknown")
+        self.assertEqual(unknown.exit_node_state, "active")
 
         self.assertEqual(Snapshot(backend_state="Running").exit_node_state, "unknown")
         self.assertEqual(Snapshot(backend_state="Running", preferences={"exit-node": ""}).exit_node_state, "none")

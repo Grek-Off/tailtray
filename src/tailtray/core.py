@@ -115,7 +115,7 @@ class Snapshot:
 
     @property
     def degraded(self) -> bool:
-        return self.connected and (bool(self.health) or self.self_online is False)
+        return self.connected and bool(self.health)
 
     @property
     def configured_exit_node(self) -> str | None:
@@ -140,12 +140,7 @@ class Snapshot:
             return "inactive"
         if not self.exit_node_id:
             return "unknown"
-        if (
-            self.health
-            or self.self_online is False
-            or self.self_online is None
-            or self.exit_node_online is None
-        ):
+        if self.health or self.exit_node_online is None:
             return "unknown"
         return "active" if self.exit_node_online else "unavailable"
 
@@ -187,8 +182,6 @@ class Snapshot:
             status = f"Connected to {self.tailnet}" if self.tailnet else "Connected"
             if self.health:
                 return "Tailscale enabled · degraded connection"
-            if self.self_online is False:
-                return "Tailscale enabled · device offline"
             if self.exit_node_state == "unavailable":
                 return f"{status} · exit node unavailable"
             return status
@@ -378,7 +371,8 @@ def parse_status(payload: Mapping[str, Any], *, profiles: tuple[Profile, ...] = 
                 id=str(self_node.get("ID") or "self"),
                 name=self_name,
                 ips=tuple(str(ip) for ip in self_ips or []),
-                online=self_online is True and payload.get("BackendState") == "Running",
+                # Self.Online tracks the control-plane poll, not tunnel state.
+                online=payload.get("BackendState") == "Running",
                 os=str(self_node.get("OS") or ""),
                 is_self=True,
             )

@@ -201,6 +201,23 @@ class StateIntegrationTests(unittest.TestCase):
             self.reply(Snapshot(backend_state="NeedsLogin", auth_url="https://login.tailscale.com/a/two"))
         opened.assert_called_once_with("https://login.tailscale.com/a/one")
 
+    def test_control_poll_changes_do_not_mark_running_tunnel_offline(self):
+        connection = None
+        for online in (True, False, None, True):
+            with self.subTest(self_online=online):
+                if connection is not None:
+                    self.controller.refresh()
+                self.reply(Snapshot(backend_state="Running", self_online=online,
+                                    exit_node_id="exit-1", exit_node_online=True))
+                self.assertIn("Connected", self.labels())
+                self.assertIn("Exit node: exit-1", self.labels())
+                self.assertFalse(any("last reported" in label for label in self.labels()))
+                self.assertIn("Disconnect", self.labels())
+                if connection is not None:
+                    self.assertIs(self.action("connection"), connection)
+                connection = self.action("connection")
+                self.assertEqual(self.controller.executor.pending, [])
+
     def test_network_warning_does_not_claim_exit_node_definitely_failed(self):
         self.reply(Snapshot(backend_state="Running", self_online=True,
                             exit_node_id="exit-1", exit_node_online=True,
