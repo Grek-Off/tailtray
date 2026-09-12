@@ -1,4 +1,8 @@
 from pathlib import Path
+import os
+import re
+import subprocess
+import tomllib
 import unittest
 
 
@@ -9,6 +13,18 @@ BUILD_SCRIPT = PROJECT_DIR / "scripts" / "build-packages.sh"
 
 
 class PackagingTests(unittest.TestCase):
+    def test_all_package_versions_match_project(self):
+        version = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text())["project"]["version"]
+        rpm_version = re.search(r"^Version:\s+(\S+)", SPEC.read_text(), re.MULTILINE).group(1)
+        self.assertEqual(rpm_version, version)
+        self.assertTrue((DEBIAN / "changelog").read_text().startswith(f"tailtray ({version}-"))
+
+    def test_mismatched_release_tag_fails_before_creating_archive(self):
+        result = subprocess.run(["bash", str(BUILD_SCRIPT), "source"], capture_output=True, text=True,
+                                env=dict(os.environ, CI_COMMIT_TAG="v99999.0.0"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Release tag must match", result.stderr)
+
     def test_build_interface_and_reproducible_source_archive_are_declared(self):
         script = BUILD_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("source|rpm|deb", script)

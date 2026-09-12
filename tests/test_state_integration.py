@@ -42,7 +42,9 @@ class StateIntegrationTests(unittest.TestCase):
             patch("tailtray.qt_app.load_settings", return_value={
                 "automatic_login": False, "automatic_reconnect": False, "want_connected": True,
             }),
-            patch("tailtray.qt_app.TailTrayQtApp._acquire_singleton_lock", return_value=None),
+            # PySide inspects the QObject class dictionary when building dynamic
+            # slots. A Mock here masquerades as arbitrary Qt metadata on 6.10.3.
+            patch("tailtray.qt_app.TailTrayQtApp._acquire_singleton_lock", new=staticmethod(lambda: None)),
             patch("tailtray.qt_app.QSystemTrayIcon.show"),
             patch("tailtray.qt_app.MenuOnlyStatusNotifier.install", return_value=None),
             patch("tailtray.controller.autostart_enabled", return_value=False, create=True),

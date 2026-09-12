@@ -1,6 +1,8 @@
 stages: [verify, source, build, release]
 
 workflow:
+  auto_cancel:
+    on_new_commit: interruptible
   rules:
     - if: '$CI_COMMIT_TAG'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -64,7 +66,7 @@ deb:
   image: debian:trixie-slim
   needs: [source]
   before_script:
-    - apt-get update -qq && apt-get install -y --no-install-recommends git python3 dpkg-dev debhelper-compat fakeroot make
+    - apt-get update -qq && apt-get install -y --no-install-recommends git python3 dpkg-dev debhelper-compat fakeroot make build-essential
   script:
     - bash scripts/build-packages.sh deb
     - dpkg-deb --contents dist/*.deb

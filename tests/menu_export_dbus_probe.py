@@ -6,6 +6,10 @@ desktop bus or the VPN. The controller uses controlled futures, not tailscale.
 
 import subprocess
 import time
+import select
+import sys
+from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from gi.repository import GLib
@@ -17,7 +21,26 @@ from tailtray.status_notifier import MenuOnlyStatusNotifier, qt_status_notifier_
 from test_state_integration import StateIntegrationTests
 
 
-def main():
+@contextmanager
+def watcher_service():
+    # Qt queries this service synchronously, so it must not share the GUI thread.
+    process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("status_notifier_watcher.py"))],
+                               stdout=subprocess.PIPE, text=True)
+    try:
+        ready, _, _ = select.select([process.stdout], [], [], 3)
+        assert ready and process.stdout.readline().strip() == "READY", "test tray host did not start"
+        yield
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        process.stdout.close()
+
+
+def run_probe():
     StateIntegrationTests.setUpClass()
     test = StateIntegrationTests()
     native_show = QSystemTrayIcon.show
@@ -94,4 +117,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with watcher_service():
+        run_probe()

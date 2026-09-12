@@ -151,8 +151,6 @@ pre-approval и сроком действия. Для обычного ноут�
 [auth keys](https://tailscale.com/docs/features/access-control/auth-keys),
 [daemon config file](https://tailscale.com/kb/1654/tailscaled-config-file).
 
-## Разработка и проверка
-
 ## Пакеты и релизы GitLab
 
 CI проверяет приложение (включая Qt/GTK и D-Bus под Xvfb), затем собирает
@@ -178,7 +176,7 @@ Package Registry: ссылки не зависят от срока хранен�
 ```fish
 bash scripts/build-packages.sh source
 bash scripts/build-packages.sh rpm  # Fedora: rpm-build, python3, git
-bash scripts/build-packages.sh deb  # Debian: dpkg-dev, debhelper-compat, fakeroot, make, python3, git
+bash scripts/build-packages.sh deb  # Debian: dpkg-dev, debhelper-compat, fakeroot, build-essential, python3, git
 ```
 
 Здесь Bash запускается явно, поскольку сборочный скрипт написан на Bash.
