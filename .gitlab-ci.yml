@@ -1,38 +1,86 @@
-image: python:3.13-slim
+stages: [verify, source, build, release]
 
-stages:
-  - verify
+workflow:
+  rules:
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+default:
+  tags: [tailtray]
+  interruptible: true
+  timeout: 30 minutes
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONDONTWRITEBYTECODE: "1"
-
-cache:
-  key:
-    files:
-      - pyproject.toml
-  paths:
-    - .cache/pip/
+  QT_QPA_PLATFORM: offscreen
 
 verify:
   stage: verify
-  interruptible: true
+  image: fedora:43
   before_script:
-    - apt-get update -qq
-    - apt-get install -y --no-install-recommends desktop-file-utils libxml2-utils dbus libegl1 libgl1 libopengl0 libglib2.0-0 libxkbcommon0
-    - python -m pip install -e '.[dev,kde]'
+    - dnf install -y git make python3 python3-pip python3-pyside6 python3-gobject libayatana-appindicator-gtk3 libsecret libnotify dbus-daemon dbus-tools xorg-x11-server-Xvfb xorg-x11-xauth desktop-file-utils libxml2
+    - python3 -m venv --system-site-packages .venv
+    - .venv/bin/pip install -e '.[dev]'
   script:
-    - python -c 'from PySide6.QtWidgets import QApplication; from PySide6.QtDBus import QDBusConnection'
-    - ruff check src tests
-    - pytest -q
-    - python -m compileall -q src tests
-    - bash -n scripts/diagnose.sh scripts/install-lib.sh scripts/install-fedora.sh
-    - find data/icons/hicolor/scalable/status -name '*.svg' -exec xmllint --noout '{}' '+'
-    - xmllint --noout data/io.github.tailtray.metainfo.xml
-    - desktop-file-validate data/io.github.tailtray.desktop
-    - python -m build
+    - .venv/bin/ruff check src tests scripts
+    - xvfb-run -a env TAILTRAY_TEST_NATIVE_MENU=1 make check
+    - .venv/bin/python -m build
   artifacts:
     expire_in: 1 week
-    paths:
-      - dist/
+    paths: [dist/]
+
+source:
+  stage: source
+  image: python:3.13-slim-trixie
+  dependencies: []
+  before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends git
+  script:
+    - bash scripts/build-packages.sh source
+  artifacts:
+    expire_in: 30 days
+    paths: [dist/]
+
+rpm:
+  stage: build
+  image: fedora:43
+  needs: [source]
+  before_script:
+    - dnf install -y git rpm-build python3
+  script:
+    - bash scripts/build-packages.sh rpm
+    - rpm -qpl dist/*.rpm
+  artifacts:
+    expire_in: 30 days
+    paths: [dist/*.rpm]
+
+deb:
+  stage: build
+  image: debian:trixie-slim
+  needs: [source]
+  before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends git python3 dpkg-dev debhelper-compat fakeroot make
+  script:
+    - bash scripts/build-packages.sh deb
+    - dpkg-deb --contents dist/*.deb
+  artifacts:
+    expire_in: 30 days
+    paths: [dist/*.deb]
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/cli:v1.114.0
+  needs: [source, rpm, deb]
+  interruptible: false
+  resource_group: tailtray-release
+  variables:
+    GLAB_ENABLE_CI_AUTOLOGIN: "true"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  script:
+    - sh scripts/publish-release.sh

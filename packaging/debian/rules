@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+
+override_dh_auto_test:
+	python3 -m unittest tests.test_packaging -v
+
+override_dh_auto_install:
+	install -d debian/tailtray/usr/lib/tailtray/tailtray
+	install -m 0644 src/tailtray/*.py debian/tailtray/usr/lib/tailtray/tailtray/
+	install -D -m 0755 bin/tailtray debian/tailtray/usr/bin/tailtray
+	install -D -m 0644 data/io.github.tailtray.desktop debian/tailtray/usr/share/applications/io.github.tailtray.desktop
+	install -D -m 0644 data/io.github.tailtray.metainfo.xml debian/tailtray/usr/share/metainfo/io.github.tailtray.metainfo.xml
+	for icon in data/icons/hicolor/scalable/status/*.svg; do \
+		install -D -m 0644 "$$icon" "debian/tailtray/usr/share/icons/hicolor/scalable/status/$$(basename "$$icon")"; \
+	done
+	for icon in data/tray-icons/*.png; do \
+		install -D -m 0644 "$$icon" "debian/tailtray/usr/share/tailtray/icons/$$(basename "$$icon")"; \
+	done

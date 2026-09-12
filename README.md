@@ -153,6 +153,39 @@ pre-approval и сроком действия. Для обычного ноут�
 
 ## Разработка и проверка
 
+## Пакеты и релизы GitLab
+
+CI проверяет приложение (включая Qt/GTK и D-Bus под Xvfb), затем собирает
+исходники, RPM для Fedora 43+ и DEB для Debian 13. Пакеты имеют архитектуру
+`noarch`/`all`; они не включают сам Tailscale. Перед установкой добавьте его
+официальный репозиторий. Установка пакетов не переключает VPN, не назначает
+operator и не запускает сервисы автоматически.
+
+Все задания используют выделенный Docker Runner с тегом `tailtray`.
+Runner должен быть привязан только к этому проекту; privileged mode и
+проброс Docker socket внутрь заданий не нужны.
+
+Для релиза обновите версию в `pyproject.toml`, `packaging/tailtray.spec` и
+`packaging/debian/changelog`, закоммитьте изменения и отправьте тег `vX.Y.Z`.
+Тег обязан совпадать с версией проекта. Пайплайн создаёт GitLab Release и
+прикрепляет RPM, DEB, архив `tailtray-X.Y.Z.tar.gz` и `SHA256SUMS` через Generic
+Package Registry: ссылки не зависят от срока хранения временных CI artifacts.
+Авторизация публикации — встроенный `CI_JOB_TOKEN`, без персонального токена
+в CI variables. Приватность файлов наследуется от GitLab-проекта.
+
+Локальная сборка из закоммиченного HEAD:
+
+```fish
+bash scripts/build-packages.sh source
+bash scripts/build-packages.sh rpm  # Fedora: rpm-build, python3, git
+bash scripts/build-packages.sh deb  # Debian: dpkg-dev, debhelper-compat, fakeroot, make, python3, git
+```
+
+Здесь Bash запускается явно, поскольку сборочный скрипт написан на Bash.
+Результаты находятся в `dist/`. Незафиксированные файлы не входят в архив.
+
+## Проверка приложения
+
 ```bash
 make check
 ```

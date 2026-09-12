@@ -6,11 +6,13 @@ License:        MIT
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
+BuildRequires:  python3
+
 Requires:       tailscale >= 1.56
-Requires:       python3
+Requires:       python3 >= 3.11
 Requires:       python3-gobject
 Requires:       python3-pyside6
-Requires:       libappindicator-gtk3
+Requires:       libayatana-appindicator-gtk3
 Requires:       libsecret
 Requires:       libnotify
 Recommends:     gnome-shell-extension-appindicator
@@ -40,7 +42,7 @@ for icon in data/tray-icons/*.png; do
 done
 
 %check
-PYTHONPATH=src %{python3} -m unittest discover -s tests -v
+%{python3} -m unittest tests.test_packaging -v
 
 %files
 %license LICENSE

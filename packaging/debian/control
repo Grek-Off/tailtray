@@ -1,0 +1,16 @@
+Source: tailtray
+Section: net
+Priority: optional
+Maintainer: TailTray contributors <codex@local>
+Build-Depends: debhelper-compat (= 13), python3
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+
+Package: tailtray
+Architecture: all
+Depends: ${misc:Depends}, tailscale (>= 1.56), python3 (>= 3.11), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, gir1.2-secret-1, gir1.2-notify-0.7, python3-pyside6.qtwidgets, python3-pyside6.qtdbus, libsecret-1-0, libnotify4
+Recommends: gnome-shell-extension-appindicator
+Description: native tray controller for the Tailscale daemon
+ TailTray is an unofficial Qt/GTK tray controller for the official Tailscale
+ daemon. It manages connection state, profiles, exit nodes, common
+ preferences, and optional keyring-backed automatic sign-in.
