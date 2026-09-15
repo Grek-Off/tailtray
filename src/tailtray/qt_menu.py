@@ -11,17 +11,19 @@ class QtMenu:
         self.menu = QMenu()
         self.activate = activate
 
-    def update(self, entries: tuple[Entry, ...]) -> None:
-        self._sync(self.menu, entries)
+    def update(self, entries: tuple[Entry, ...]) -> bool:
+        """Return whether items were added/removed, not merely changed or moved."""
+        return self._sync(self.menu, entries)
 
     def _trigger(self, action: QAction, checked: bool) -> None:
         entry = action._entry
         if entry is not None and entry.enabled and entry.command:
             self.activate(entry, checked)
 
-    def _sync(self, menu: QMenu, entries: tuple[Entry, ...]) -> None:
+    def _sync(self, menu: QMenu, entries: tuple[Entry, ...]) -> bool:
         existing = {action.objectName(): action for action in menu.actions()}
         keys = {entry.key for entry in entries}
+        membership_changed = existing.keys() != keys
         for key, action in existing.items():
             if key not in keys:
                 action._entry = None
@@ -53,8 +55,10 @@ class QtMenu:
                 action.setChecked(entry.checked)
             if entry.children is not None:
                 action.menu().setTitle(entry.label)
-                self._sync(action.menu(), entry.children)
+                child_changed = self._sync(action.menu(), entry.children)
+                membership_changed = membership_changed or child_changed
             current = menu.actions()
             if current[index] is not action:
                 menu.removeAction(action)
                 menu.insertAction(current[index], action)
+        return membership_changed

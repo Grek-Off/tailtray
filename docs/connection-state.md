@@ -49,6 +49,26 @@ a `closed` event for Disconnect to turn into Connect. Programmatic checkbox
 updates do not submit commands; selections remain observed, not optimistic.
 Removed items lose their callbacks before destruction.
 
+### KDE dynamic submenu cache
+
+When membership changes (items added or removed at any depth), the Qt backend
+also emits the standard StatusNotifierItem `NewMenu` signal. Plasma's importer
+can retain an `m_idsRefreshedByAboutToShow` marker after first fetching an empty
+local submenu; that consumes the next real `LayoutUpdated` even much later.
+KDE's exporter batches changes into one signal per parent, so the first newly
+available exit node can remain absent in Plasma despite being in `GetLayout`.
+`NewMenu` invalidates the host importer, including that stale marker.
+
+Our QMenus and surviving QActions remain stable. The host may dismiss its menu
+once when membership changes; ordinary polling, label/checkmark changes and
+online-status reordering do not invalidate it. A CLI refresh cannot repair an
+already stale host cache if membership does not change.
+
+Verified against Qt 6.11.2 and Plasma 6.7.5 on 2026-09-15. Recheck this
+compatibility handling when Plasma changes its importer:
+[importer](https://github.com/KDE/plasma-workspace/blob/master/libdbusmenuqt/dbusmenuimporter.cpp),
+[StatusNotifierItem source](https://github.com/KDE/plasma-workspace/blob/master/applets/systemtray/statusnotifieritemsource.cpp).
+
 Saved `exit-node=auto:any` and the current `ExitNodeStatus.ID` are separate:
 automatic selection without a candidate is not reported as None or active.
 When optional preferences are unavailable their toggles are disabled.
@@ -83,6 +103,14 @@ and no close events) and native GTK widgets. The earlier activation-only probe
 remains a separate regression check. Both use a private session bus and fake
 CLI responses, never the desktop's session bus or a live down/up cycle. A
 graphical display and dependencies must be present for native checks.
+
+The export probe also checks first addition, removal and reappearance of exit
+nodes with a previously opened submenu, simultaneous device-list changes,
+and one `NewMenu` notification per membership update. It runs with both generic
+Qt and, when installed, the KDE platform theme; generic Qt alone emits extra
+layout signals and can conceal the KDE failure. Renderer/controller tests
+check that identical polls and reordering neither invalidate the host cache
+nor replace surviving actions. No test invokes live exit-node selection.
 
 The new no-close controller regression fails against commit c69978f with
 `'Disconnect after current operation' != 'Connect'` and passes with the

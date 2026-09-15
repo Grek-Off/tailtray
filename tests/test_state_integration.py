@@ -218,6 +218,25 @@ class StateIntegrationTests(unittest.TestCase):
                 connection = self.action("connection")
                 self.assertEqual(self.controller.executor.pending, [])
 
+    def test_new_exit_node_invalidates_host_cache_once_without_replacing_actions(self):
+        notifier = Mock()
+        self.controller.status_notifier = notifier
+        old = ExitNode(id="old", name="Zulu", target="100.64.0.1", online=True)
+        new = ExitNode(id="new", name="Alpha", target="100.64.0.2", online=True)
+        self.reply(Snapshot(backend_state="Running", exit_nodes=(old,)))
+        root = self.controller.menu
+        submenu = self.action("exit-nodes").menu()
+        old_action = self.action("exit:old")
+        notifier.reset_mock()
+        for nodes, notifications in (((new, old), 1), ((new, old), 1), ((old, new), 1), ((old,), 2)):
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="Running", exit_nodes=nodes))
+            self.assertEqual(notifier.menu_changed.call_count, notifications)
+            self.assertIs(self.controller.menu, root)
+            self.assertIs(self.action("exit-nodes").menu(), submenu)
+            self.assertIs(self.action("exit:old"), old_action)
+            self.assertEqual(self.controller.executor.pending, [])
+
     def test_network_warning_does_not_claim_exit_node_definitely_failed(self):
         self.reply(Snapshot(backend_state="Running", self_online=True,
                             exit_node_id="exit-1", exit_node_online=True,

@@ -124,7 +124,13 @@ class TailTrayQtApp(OperationControllerMixin, QObject):
 
     def _render_menu(self) -> None:
         if not self.operation_coordinator._shutdown:
-            self.menu_renderer.update(self._menu_entries())
+            membership_changed = self.menu_renderer.update(self._menu_entries())
+            if membership_changed and self.status_notifier is not None:
+                # Plasma can swallow the first LayoutUpdated after initially
+                # fetching an empty submenu (m_idsRefreshedByAboutToShow).
+                # Invalidate that host cache only when membership changes;
+                # labels, checkmarks and online-status reordering stay in place.
+                self.status_notifier.menu_changed()
 
     def _dispatch_callback(self, callback) -> None:
         if self.operation_coordinator._shutdown:

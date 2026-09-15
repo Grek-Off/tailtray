@@ -124,6 +124,27 @@ class QtMenuTests(unittest.TestCase):
         action.trigger()
         activate.assert_not_called()
 
+    def test_membership_change_detection_keeps_property_and_order_updates_quiet(self):
+        renderer = QtMenu(Mock())
+        self.addCleanup(renderer.menu.deleteLater)
+
+        def entries(*children):
+            return (Entry("exit-nodes", "Exit nodes", children=children),)
+
+        old = Entry("old", "Zulu", "exit-node", ("100.64.0.1",), checked=False)
+        new = Entry("new", "Alpha", "exit-node", ("100.64.0.2",), checked=False)
+        self.assertTrue(renderer.update(entries(old)))
+        submenu = renderer.menu.actions()[0].menu()
+        old_action = submenu.actions()[0]
+        self.assertFalse(renderer.update(entries(old)))
+        self.assertTrue(renderer.update(entries(new, old)))
+        self.assertFalse(renderer.update(entries(old, new)))
+        renamed = Entry("old", "Zulu (offline)", "exit-node", ("100.64.0.1",), checked=True)
+        self.assertFalse(renderer.update(entries(renamed, new)))
+        self.assertTrue(renderer.update(entries(old)))
+        self.assertIs(renderer.menu.actions()[0].menu(), submenu)
+        self.assertIs(submenu.actions()[0], old_action)
+
     def test_manual_disconnect_disables_reconnect_intent(self):
         controller = TailTrayQtApp.__new__(TailTrayQtApp)
         controller.settings = {"automatic_reconnect": True, "want_connected": True}

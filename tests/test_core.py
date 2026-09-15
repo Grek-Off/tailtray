@@ -47,6 +47,27 @@ STATUS = {
 
 
 class CoreTests(unittest.TestCase):
+    def test_exit_node_discovery_is_not_cached_with_preferences(self):
+        payload = json.loads(json.dumps(STATUS))
+        peer = {"ID": "new-node", "HostName": "new-exit", "TailscaleIPs": ["100.64.0.99"],
+                "Online": True, "ExitNodeOption": False}
+        payload["Peer"]["nodekey:new"] = peer
+        calls = []
+
+        def runner(args, timeout):
+            calls.append(args[1:])
+            return CommandResult(returncode=0, stdout=json.dumps(payload) if args[1] == "status" else "{}")
+
+        cli = TailscaleCLI(runner=runner)
+        with patch("tailtray.core.time.monotonic", return_value=10):
+            self.assertNotIn("new-node", [n.id for n in cli.snapshot().exit_nodes])
+            peer["ExitNodeOption"] = True
+            self.assertIn("new-node", [n.id for n in cli.snapshot().exit_nodes])
+            peer["ExitNodeOption"] = False
+            self.assertNotIn("new-node", [n.id for n in cli.snapshot().exit_nodes])
+        self.assertEqual(calls.count(["status", "--json"]), 3)
+        self.assertEqual(calls.count(["get", "--json", "all"]), 1)
+
     def test_parse_status_and_exit_nodes(self):
         snapshot = parse_status(STATUS)
         self.assertTrue(snapshot.connected)
