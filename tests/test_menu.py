@@ -1,6 +1,6 @@
 import unittest
 
-from tailtray.core import Snapshot
+from tailtray.core import Profile, Snapshot
 from tailtray.menu import build_menu
 
 
@@ -18,6 +18,30 @@ def flatten(items):
 
 
 class MenuModelTests(unittest.TestCase):
+    def test_tailnets_are_accessible_and_distinguish_the_same_login(self):
+        profiles = (Profile("work", "me@example.com", "work.example", selected=True),
+                    Profile("home", "me@example.com", "home.example"))
+        for state in ("Running", "Stopped", "NeedsLogin"):
+            root = {e.key: e for e in entries(Snapshot(backend_state=state, tailnet="work.example", profiles=profiles))}
+            chooser = root["profiles"]
+            self.assertEqual(chooser.label, "Tailnet: work.example")
+            self.assertTrue(chooser.enabled)
+            items = {e.key: e for e in chooser.children}
+            self.assertEqual(items["profile:home"].args, ("home",))
+            self.assertEqual(items["profile:home"].label, "home.example — me@example.com")
+            self.assertTrue(items["profile:work"].checked)
+            self.assertFalse(items["profile:home"].checked)
+            self.assertTrue(items["add-tailnet"].enabled)
+        for options in ({"busy": True}, {"current": False}):
+            root = {e.key: e for e in entries(Snapshot(profiles=profiles), **options)}
+            self.assertFalse(root["profiles"].enabled)
+            self.assertTrue(all(not e.enabled for e in root["profiles"].children if not e.separator))
+
+    def test_tailnet_can_be_added_without_saved_profiles(self):
+        root = {e.key: e for e in entries(Snapshot(backend_state="NeedsLogin"))}
+        self.assertTrue(root["profiles"].enabled)
+        self.assertEqual(root["profiles"].children[-1].command, "add-tailnet")
+
     def test_every_backend_state_has_a_recovery_action(self):
         for state, command in (("Running", "disconnect"), ("Stopped", "connect"),
                                ("Starting", "disconnect"), ("NeedsLogin", "login"),

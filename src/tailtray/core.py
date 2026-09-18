@@ -54,6 +54,13 @@ class Profile:
             return f"{primary} ({self.tailnet})"
         return primary
 
+    @property
+    def tailnet_label(self) -> str:
+        primary = self.tailnet or self.nickname or self.account or self.id
+        details = list(dict.fromkeys(value for value in (self.account, self.nickname)
+                                    if value and value.casefold() != primary.casefold()))
+        return f"{primary} — {', '.join(details)}" if details else primary
+
 
 @dataclass(frozen=True, slots=True)
 class ExitNode:

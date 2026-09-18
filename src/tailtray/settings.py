@@ -19,8 +19,8 @@ def config_path() -> Path:
     return config_home() / "tailtray" / "config.json"
 
 
-def load_settings() -> dict[str, bool]:
-    defaults = {
+def load_settings() -> dict[str, bool | str]:
+    defaults: dict[str, bool | str] = {
         "automatic_login": True,
         "automatic_reconnect": True,
         "want_connected": True,
@@ -33,10 +33,12 @@ def load_settings() -> dict[str, bool]:
         for key in defaults:
             if isinstance(payload.get(key), bool):
                 defaults[key] = payload[key]
+        if isinstance(payload.get("auth_key_profile"), str):
+            defaults["auth_key_profile"] = payload["auth_key_profile"]
     return defaults
 
 
-def save_settings(settings: dict[str, bool]) -> None:
+def save_settings(settings: dict[str, bool | str]) -> None:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")

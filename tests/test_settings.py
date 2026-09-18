@@ -8,6 +8,13 @@ from tailtray.settings import autostart_enabled, load_settings, save_settings, s
 
 
 class SettingsTests(unittest.TestCase):
+    def test_auth_key_profile_binding_round_trips_without_the_secret(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
+            save_settings({"automatic_login": True, "auth_key_profile": "p1"})
+            self.assertEqual(load_settings()["auth_key_profile"], "p1")
+            save_settings({"auth_key_profile": False})
+            self.assertNotIn("auth_key_profile", load_settings())
+
     def test_settings_round_trip_and_mode(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
             defaults = load_settings()

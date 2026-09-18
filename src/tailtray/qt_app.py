@@ -288,7 +288,7 @@ class TailTrayQtApp(OperationControllerMixin, QObject):
             self.notify("TailTray", "That does not look like a Tailscale auth key")
             return
         try:
-            self.secrets.set(key)
+            self._store_auth_key(key)
         except Exception as exc:
             self.notify("TailTray", f"Could not save key: {exc}")
             return

@@ -35,11 +35,24 @@ changing command construction or supporting a different CLI version.
 | Connect | Bare `tailscale up`; preserves saved non-default settings. Subprocess timeout, not an `up` flag. |
 | Disconnect | `tailscale down`; does not log out or erase preferences. |
 | Exit node / boolean preference | `tailscale set --flag=value`; works while Stopped, changes only that preference. |
-| Switch saved account | `tailscale switch PROFILE_ID`. |
+| Switch saved tailnet | `tailscale switch PROFILE_ID`; refresh before selecting the new radio or enabling mutations. |
+| Add tailnet | `tailscale login --timeout=3s`; open the returned URL, never reuse the previous profile's AuthURL or auth key. |
 | Sign in when NeedsLogin | `tailscale login`; separate from enabling an authenticated node. |
 | Full restart | down → privileged service restart → wait for daemon → up. |
 
 [Official CLI reference](https://tailscale.com/docs/reference/tailscale-cli).
+
+Tailnet selection uses local profile IDs, not email addresses (one login can
+belong to several tailnets). A successful switch restores connection intent;
+a failed switch must not reconnect the old network against a previous manual
+Disconnect. A queued Disconnect still wins. Login initiated by Add tailnet is
+not restarted on subsequent NeedsLogin polls. Manual Disconnect ends that login
+episode, so a later Connect can open a fresh login if needed. The optional stored auth key
+is associated with its selected profile and is never automatically used when
+that profile is absent, different, or unavailable. Key replacement first
+persists an unbound marker, so failure between the config and Secret Service
+writes cannot label the previous network's key as belonging to the new one.
+Profile bindings contain no secrets.
 
 The toolkit-independent menu model derives labels, commands and enablement
 from the same observation and operation state. Qt and GTK reconcile stable

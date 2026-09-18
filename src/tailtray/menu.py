@@ -50,8 +50,12 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
     suffix = " · last reported" if s.degraded else ""
 
     selected_profile = next((p for p in s.profiles if p.selected), None)
-    profiles = tuple(Entry("profile:" + p.id, p.label, "profile", (p.id,),
+    profiles = tuple(Entry("profile:" + p.id, p.tailnet_label, "profile", (p.id,),
                            enabled=editable, checked=p.selected) for p in s.profiles)
+    tailnets = profiles + (
+        Entry("sep-tailnets", separator=True),
+        Entry("add-tailnet", "Add tailnet…", "add-tailnet", enabled=editable),
+    )
     options = (
         ("accept-dns", "Use Tailscale DNS", True),
         ("accept-routes", "Accept subnet routes", False),
@@ -66,7 +70,7 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
     auth = [Entry("admin", "Tailscale admin console…", "admin")]
     if secrets_available:
         auth.append(Entry("key", "Replace automatic sign-in key…" if has_key else "Set up automatic sign-in…",
-                          "auth-key", enabled=not busy))
+                          "auth-key", enabled=editable and selected_profile is not None))
         if has_key:
             auth.append(Entry("forget-key", "Forget automatic sign-in key", "forget-key", enabled=not busy))
     auth.append(Entry("automatic-login", "Sign in automatically when required", "auto-login",
@@ -77,8 +81,6 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
         Entry("version", f"Tailscale {s.version or 'unknown'}", enabled=False),
     )
     more = (
-        Entry("profiles", f"Account: {selected_profile.label if selected_profile else 'select'}",
-              enabled=bool(profiles) and editable, children=profiles),
         Entry("preferences", "Preferences", enabled=editable and bool(s.preferences), children=prefs),
         Entry("authentication", "Authentication", children=tuple(auth)),
         Entry("maintenance", "Maintenance", children=maintenance),
@@ -109,6 +111,8 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
         Entry("health", f"⚠ {s.health[0]}" if s.health else "", enabled=False),
         Entry("sep-main", separator=True),
         primary,
+        Entry("profiles", f"Tailnet: {s.tailnet or (selected_profile.tailnet if selected_profile else '') or 'select'}",
+              enabled=editable, children=tailnets),
         Entry("devices", f"Devices ({len(devices)}){suffix}", enabled=bool(devices), children=devices),
         Entry("exit-nodes", s.exit_node_label, enabled=editable, children=exit_nodes),
         Entry("sep-more", separator=True),

@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, SLOT, Slot
 from PySide6.QtDBus import QDBusConnection
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from tailtray.core import Device, ExitNode, Snapshot
+from tailtray.core import Device, ExitNode, Profile, Snapshot
 from tailtray.status_notifier import MenuOnlyStatusNotifier, qt_status_notifier_connection_name
 from test_state_integration import StateIntegrationTests
 
@@ -167,7 +167,32 @@ def run_probe():
             layout = call("GetLayout", exit_id, 1, "[]")[1]
             labels = [child[1].get("label") for child in layout[2]]
             assert labels == ["None", "Automatic (best available)", *(n.label for n in nodes)], labels
-        print("PASS: real Qt D-Bus menu, connection cycles and dynamic exit-node layout notifications")
+        def profile_snapshot(selected):
+            return Snapshot(backend_state="Running", tailnet=selected,
+                            profiles=tuple(Profile(p, "same@login", p, selected=p == selected)
+                                           for p in ("home.example", "work.example")))
+
+        controller.refresh()
+        test.reply(profile_snapshot("home.example"))
+        with patch("tailtray.qt_app.save_settings"):
+            for selected in ("work.example", "home.example"):
+                item_id, _ = find(f"{selected} — same@login")
+                call("Event", item_id, "clicked", "<0>", "uint32 0")
+                deadline = time.monotonic() + 1
+                while not controller.executor.pending and time.monotonic() < deadline:
+                    QApplication.processEvents()
+                    time.sleep(.005)
+                assert controller.executor.pending, "tailnet click did not dispatch a command"
+                command, future = controller.executor.pending.pop(0)
+                future.set_result(command())
+                QApplication.processEvents()
+                controller.cli.switch_profile.assert_called_with(selected)
+                controller.refresh()
+                test.reply(profile_snapshot(selected))
+                _item_id, props = find(f"{selected} — same@login")
+                assert props.get("toggle-state") == 1, "observed tailnet was not selected"
+        controller.cli.begin_interactive_login.assert_not_called()
+        print("PASS: real Qt D-Bus menu, connection/tailnet cycles and dynamic exit-node notifications")
     finally:
         test.controller.tray.hide()
         test.doCleanups()

@@ -327,6 +327,26 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(cli._profiles_cache)
         self.assertIsNone(cli._preferences_cache)
 
+    def test_tailnet_switch_invalidates_metadata_even_on_error(self):
+        for result in (CommandResult(), CommandResult(stderr="switch failed", returncode=1)):
+            calls = []
+
+            def runner(argv, timeout):
+                calls.append(argv)
+                return result
+
+            cli = TailscaleCLI(runner=runner)
+            cli._profiles_cache = (0, (), ())
+            cli._preferences_cache = (0, {"exit-node": "old-node"}, ())
+            if result.returncode:
+                with self.assertRaises(TailscaleError):
+                    cli.switch_profile("p2")
+            else:
+                cli.switch_profile("p2")
+            self.assertEqual(calls, [["tailscale", "switch", "p2"]])
+            self.assertIsNone(cli._profiles_cache)
+            self.assertIsNone(cli._preferences_cache)
+
     def test_operator_command_rejects_option_injection(self):
         self.assertEqual(privileged_operator_command("vladimir")[-1], "--operator=vladimir")
         with self.assertRaises(ValueError):

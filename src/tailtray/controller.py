@@ -160,7 +160,7 @@ class OperationControllerMixin:
             if command in {"profile", "exit-node"}:
                 if not entry.checked:
                     if command == "profile":
-                        self._action("Account switch", lambda: self.cli.switch_profile(args[0]))
+                        self.switch_tailnet(args[0])
                     else:
                         self._action("Exit node change", lambda: self.cli.set_exit_node(args[0]))
             elif command == "preference":
@@ -175,6 +175,7 @@ class OperationControllerMixin:
                     "full-restart": self.confirm_full_restart, "start-service": self.start_service,
                     "grant-operator": self.grant_operator, "auth-key": self.prompt_auth_key,
                     "forget-key": self.forget_auth_key,
+                    "add-tailnet": self.add_tailnet,
                     "auto-login": lambda: self.toggle_automatic_login(checked),
                     "auto-reconnect": lambda: self.toggle_automatic_reconnect(checked),
                     "autostart": lambda: self.toggle_autostart(checked),
@@ -199,7 +200,7 @@ class OperationControllerMixin:
             print(f"tailtray: automatic reconnect failed: {error}", file=sys.stderr)
         if description in {"Automatic reconnect", "Connecting", "Full restart"}:
             self.reconnect_policy.finish(succeeded=succeeded, now=time.monotonic())
-        if description == "Account switch" and succeeded:
+        if description == "Tailnet switch" and succeeded:
             self.login_token = ""
         if hasattr(self, "_render_menu"):
             self._render_menu()
@@ -212,14 +213,88 @@ class OperationControllerMixin:
         except OSError as exc:
             self.notify("TailTray", f"Connection choice applies this session but could not be saved: {exc}")
 
+    def _set_auth_key_owner(self, profile_id: str) -> None:
+        previous = self.settings.get("auth_key_profile")
+        self.settings["auth_key_profile"] = profile_id
+        try:
+            self._save_settings(self.settings)
+        except Exception:
+            if previous is None:
+                self.settings.pop("auth_key_profile", None)
+            else:
+                self.settings["auth_key_profile"] = previous
+            raise
+
+    def _bind_auth_key(self) -> None:
+        """Associate the one optional reusable key with its current local profile."""
+        profile = next((p for p in self.snapshot.profiles if p.selected), None)
+        # Unknown is deliberately not a wildcard: never use a previous network's
+        # key to complete login to a newly selected network.
+        self._set_auth_key_owner(profile.id if profile else "unbound")
+
+    def _prepare_profile_change(self) -> None:
+        if self.auth_key and not self.settings.get("auth_key_profile"):
+            # Bind legacy keys before leaving their original profile. If saving
+            # fails, do not switch and lose the only durable association.
+            if len(self.snapshot.profiles) == 1:
+                self._bind_auth_key()
+            else:
+                self._set_auth_key_owner("unbound")
+
+    def _store_auth_key(self, key: str) -> None:
+        if not any(p.selected for p in self.snapshot.profiles):
+            raise ValueError("Sign in to a tailnet before setting its automatic sign-in key")
+        # Secret Service and config are separate stores. Fail closed between
+        # writes so a failed key replacement cannot relabel the previous key.
+        self._set_auth_key_owner("unbound")
+        self.auth_key = ""
+        self.secrets.set(key)
+        self._bind_auth_key()
+        self.auth_key = key
+
+    def switch_tailnet(self, profile_id: str) -> None:
+        if self.operation_busy or not self.operation_coordinator.observation_current:
+            return
+        profile = next((p for p in self.snapshot.profiles if p.id == profile_id), None)
+        if profile is None or profile.selected:
+            return
+        self._prepare_profile_change()
+        self._action("Tailnet switch", lambda: self.cli.switch_profile(profile_id),
+                     on_success=lambda _result: self._set_connection_intent(True))
+
+    def add_tailnet(self) -> None:
+        if self.operation_busy or not self.operation_coordinator.observation_current:
+            return
+        self._prepare_profile_change()
+        # Always request a new profile, not a stale AuthURL or the stored key.
+        # Subsequent NeedsLogin polls must not restart this browser login.
+        self.login_token = "NeedsLogin"
+
+        def open_login(url: str) -> None:
+            self._set_connection_intent(True)
+            self._open_login_url(url)
+
+        self._action("Add tailnet", self.cli.begin_interactive_login, on_success=open_login)
+
+    def _auth_key_matches_profile(self) -> bool:
+        owner = self.settings.get("auth_key_profile")
+        if owner:
+            return owner != "unbound" and any(p.selected and p.id == owner for p in self.snapshot.profiles)
+        # Compatibility with legacy single-profile setups. Multiple profiles
+        # require an explicit binding; missing metadata cannot prove ownership.
+        return len(self.snapshot.profiles) == 1 and self.snapshot.profiles[0].selected
+
     def connect_tailscale(self, *_args) -> None:
         if self.operation_busy:
             return
+        self.login_token = ""
         self._set_connection_intent(True)
         self.reconnect_policy.reset()
         self._action("Connecting", self.cli.connect)
 
     def disconnect_tailscale(self, *_args) -> None:
+        # A cancelled browser login must not suppress a later Connect episode.
+        self.login_token = ""
         self._set_connection_intent(False)
         if not self.operation_busy:
             self.reconnect_policy.reset()
@@ -257,7 +332,7 @@ class OperationControllerMixin:
         if self.login_token == token:
             return
         self.login_token = token
-        if self.auth_key:
+        if self.auth_key and self._auth_key_matches_profile():
             self._action("Automatic sign-in", lambda: self.cli.login_with_auth_key(self.auth_key))
         elif snapshot.auth_url:
             self._open_login_url(snapshot.auth_url)

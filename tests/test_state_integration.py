@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
-from tailtray.core import CommandResult, ExitNode, Profile, Snapshot, TailscaleCLI, TailscaleError
+from tailtray.core import CommandResult, Device, ExitNode, Profile, Snapshot, TailscaleCLI, TailscaleError
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
@@ -110,6 +110,155 @@ class StateIntegrationTests(unittest.TestCase):
                     self.assertEqual(runner.call_args.args[0], ["tailscale", *argv])
                     self.controller.refresh()
                     self.reply(snapshot)
+
+    def test_tailnet_switch_waits_for_observation_and_replaces_network_data(self):
+        def snapshot(selected):
+            return Snapshot(backend_state="Running", tailnet=selected,
+                            profiles=tuple(Profile(p, "same@login", p, selected=p == selected) for p in ("a", "b")),
+                            devices=(Device(selected, selected, ("100.64.0.1",)),),
+                            exit_nodes=(ExitNode(selected, selected, "100.64.0.2", online=True),),
+                            exit_node_id=selected, exit_node_online=True,
+                            preferences={"exit-node": "100.64.0.2"})
+
+        self.reply(snapshot("a"))
+        root = self.controller.menu
+        with patch("tailtray.qt_app.save_settings"):
+            for old, new in (("a", "b"), ("b", "a")):
+                self.action("profile:" + new).trigger()
+                self.assertTrue(self.action("profile:" + old).isChecked())
+                self.assertFalse(self.action("profiles").isEnabled())
+                command, future = self.controller.executor.pending.pop(0)
+                future.set_result(command())
+                QApplication.processEvents()
+                self.controller.cli.switch_profile.assert_called_with(new)
+                self.assertFalse(self.action("profiles").isEnabled())
+                self.controller.refresh()
+                self.reply(snapshot(new))
+                self.assertIs(self.controller.menu, root)
+                self.assertTrue(self.action("profile:" + new).isChecked())
+                self.assertEqual(self.action("profiles").text(), "Tailnet: " + new)
+                self.assertIsNone(self.action("device:" + old))
+                self.assertIsNone(self.action("exit:" + old))
+                self.assertIsNotNone(self.action("exit:" + new))
+                self.action("profile:" + new).trigger()
+                self.assertEqual(self.controller.executor.pending, [])
+        self.controller.cli.begin_interactive_login.assert_not_called()
+        self.controller.cli.login_with_auth_key.assert_not_called()
+        self.controller.cli.connect.assert_not_called()
+
+    def test_failed_tailnet_switch_does_not_connect_the_old_network(self):
+        self.controller.settings.update(want_connected=False, automatic_reconnect=True)
+        snapshot = Snapshot(backend_state="Stopped", profiles=(Profile("a", "a", selected=True), Profile("b", "b")))
+        self.reply(snapshot)
+        with patch.object(self.controller, "notify") as notify:
+            self.action("profile:b").trigger()
+            _command, future = self.controller.executor.pending.pop(0)
+            future.set_exception(TailscaleError("switch failed"))
+            QApplication.processEvents()
+            self.controller.refresh()
+            self.reply(snapshot)
+        notify.assert_called_once()
+        self.assertTrue(self.action("profile:a").isChecked())
+        self.assertFalse(self.controller.settings["want_connected"])
+        self.assertEqual(self.controller.executor.pending, [])
+
+    def test_add_tailnet_uses_new_browser_login_not_old_url_or_key(self):
+        profiles = (Profile("a", "a", selected=True),)
+        self.controller.auth_key = "tskey-test-old-network"
+        self.controller.settings["automatic_login"] = True
+        self.reply(Snapshot(backend_state="Running", profiles=profiles, auth_url="https://login.tailscale.com/old"))
+        with patch("tailtray.qt_app.save_settings"), patch.object(self.controller, "_open_login_url") as opened:
+            self.action("add-tailnet").trigger()
+            command, future = self.controller.executor.pending.pop(0)
+            self.assertEqual(command, self.controller.cli.begin_interactive_login)
+            future.set_result("https://login.tailscale.com/new")
+            QApplication.processEvents()
+            opened.assert_called_once_with("https://login.tailscale.com/new")
+            for _ in range(2):
+                self.controller.refresh()
+                self.reply(Snapshot(backend_state="NeedsLogin", profiles=profiles, auth_url="https://login.tailscale.com/new"))
+                self.assertEqual(self.controller.executor.pending, [])
+            self.assertEqual(self.controller.settings["auth_key_profile"], "a")
+        self.controller.cli.login_with_auth_key.assert_not_called()
+
+    def test_disconnect_during_add_tailnet_does_not_suppress_later_login(self):
+        self.controller.settings["automatic_login"] = True
+        self.reply(Snapshot(backend_state="Running", profiles=(Profile("a", "a", selected=True),)))
+        with patch("tailtray.qt_app.save_settings"), patch.object(self.controller, "_open_login_url") as opened:
+            self.controller.add_tailnet()
+            self.controller.disconnect_tailscale()
+            _add, future = self.controller.executor.pending.pop(0)
+            future.set_result("https://login.tailscale.com/cancelled")
+            QApplication.processEvents()
+            opened.assert_not_called()
+            down, future = self.controller.executor.pending.pop(0)
+            self.assertEqual(down, self.controller.cli.disconnect)
+            future.set_result(None)
+            QApplication.processEvents()
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="Stopped"))
+            self.controller.connect_tailscale()
+            _connect, future = self.controller.executor.pending.pop(0)
+            future.set_result(None)
+            QApplication.processEvents()
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="NeedsLogin", auth_url="https://login.tailscale.com/new"))
+            opened.assert_called_once_with("https://login.tailscale.com/new")
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="NeedsLogin", auth_url="https://login.tailscale.com/new"))
+            self.assertEqual(opened.call_count, 1)
+
+    def test_bound_auth_key_never_crosses_tailnets_or_missing_metadata(self):
+        self.controller.auth_key = "tskey-test-network-a"
+        self.controller.settings["auth_key_profile"] = "a"
+        for profiles, expected in (((Profile("a", "a", selected=True),), True),
+                                   ((Profile("b", "b", selected=True),), False), ((), False)):
+            self.controller.snapshot = Snapshot(profiles=profiles)
+            self.assertEqual(self.controller._auth_key_matches_profile(), expected)
+        self.controller.settings["automatic_login"] = True
+        self.reply(Snapshot(backend_state="NeedsLogin", profiles=(Profile("b", "b", selected=True),)))
+        command, _future = self.controller.executor.pending.pop(0)
+        self.assertEqual(command, self.controller.cli.begin_interactive_login)
+        self.controller.cli.login_with_auth_key.assert_not_called()
+
+    def test_failed_key_replacement_does_not_relabel_the_previous_key(self):
+        self.reply(Snapshot(backend_state="Running", profiles=(Profile("b", "b", selected=True),)))
+        self.controller.settings["auth_key_profile"] = "a"
+        self.controller.auth_key = "tskey-test-a"
+        self.controller.secrets.set.side_effect = RuntimeError("keyring locked")
+        with patch("tailtray.qt_app.save_settings"), self.assertRaises(RuntimeError):
+            self.controller._store_auth_key("tskey-test-b")
+        self.assertEqual(self.controller.settings["auth_key_profile"], "unbound")
+        self.assertEqual(self.controller.auth_key, "")
+        self.assertFalse(self.controller._auth_key_matches_profile())
+
+    def test_failed_binding_write_still_blocks_a_retried_profile_change(self):
+        self.reply(Snapshot(backend_state="Running", profiles=(Profile("a", "a", selected=True),)))
+        self.controller.auth_key = "tskey-test-a"
+        with patch("tailtray.qt_app.save_settings", side_effect=OSError("disk full")) as save:
+            for _ in range(2):
+                with self.assertRaises(OSError):
+                    self.controller.add_tailnet()
+                self.assertNotIn("auth_key_profile", self.controller.settings)
+                self.assertEqual(self.controller.executor.pending, [])
+            self.assertEqual(save.call_count, 2)
+
+    def test_disconnect_queued_during_tailnet_switch_keeps_disconnected_intent(self):
+        self.reply(Snapshot(backend_state="Running", profiles=(Profile("a", "a", selected=True), Profile("b", "b"))))
+        with patch("tailtray.qt_app.save_settings"):
+            self.action("profile:b").trigger()
+            self.controller.disconnect_tailscale()
+            command, future = self.controller.executor.pending.pop(0)
+            future.set_result(command())
+            QApplication.processEvents()
+            self.assertFalse(self.controller.settings["want_connected"])
+            down, future = self.controller.executor.pending.pop(0)
+            self.assertEqual(down, self.controller.cli.disconnect)
+            future.set_result(None)
+            QApplication.processEvents()
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="Stopped", profiles=(Profile("b", "b", selected=True),)))
+        self.assertEqual(self.controller.executor.pending, [])
 
     def test_failed_preference_change_restores_observed_checkbox_without_extra_command(self):
         self.reply(Snapshot(backend_state="Running", preferences={"accept-dns": True}))
