@@ -69,6 +69,7 @@ class StatusNotifierTests(unittest.TestCase):
         project_dir = Path(__file__).resolve().parents[1]
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(project_dir / "src")
+        environment["TAILTRAY_PROBE_DEBUG"] = "1"
         completed = subprocess.run(
             [
                 shutil.which("dbus-run-session"),
