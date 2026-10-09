@@ -1,4 +1,4 @@
-stages: [verify, source, build, release]
+stages: [verify, source, build, release, repository-check, deploy]
 
 workflow:
   auto_cancel:
@@ -50,40 +50,91 @@ source:
 
 rpm:
   stage: build
-  image: fedora:43
+  parallel:
+    matrix:
+      - TARGET_DISTRO: fedora43
+        BUILD_IMAGE: fedora:43
+      - TARGET_DISTRO: fedora44
+        BUILD_IMAGE: fedora:44
+  image: $BUILD_IMAGE
   needs: [source]
   before_script:
-    - dnf install -y git rpm-build python3
+    - dnf install -y --setopt=install_weak_deps=False git rpm-build python3 curl
   script:
     - bash scripts/build-packages.sh rpm
     - rpm -qpl dist/*.rpm
+    - bash scripts/smoke-package.sh rpm
   artifacts:
     expire_in: 30 days
     paths: [dist/*.rpm]
 
 deb:
   stage: build
-  image: debian:trixie-slim
+  parallel:
+    matrix:
+      - TARGET_DISTRO: debian13
+        BUILD_IMAGE: debian:trixie-slim
+      - TARGET_DISTRO: ubuntu26.04
+        BUILD_IMAGE: ubuntu:26.04
+  image: $BUILD_IMAGE
   needs: [source]
   before_script:
-    - apt-get update -qq && apt-get install -y --no-install-recommends git python3 dpkg-dev debhelper-compat fakeroot make build-essential
+    - apt-get update -qq && apt-get install -y --no-install-recommends git python3 dpkg-dev debhelper-compat fakeroot make build-essential curl ca-certificates
   script:
     - bash scripts/build-packages.sh deb
     - dpkg-deb --contents dist/*.deb
+    - bash scripts/smoke-package.sh deb
   artifacts:
     expire_in: 30 days
     paths: [dist/*.deb]
 
 release:
   stage: release
-  tags: [tailtray]
-  image: registry.gitlab.com/gitlab-org/cli:v1.114.0
+  image: fedora:43
   needs: [source, rpm, deb]
   interruptible: false
   resource_group: tailtray-release
-  variables:
-    GLAB_ENABLE_CI_AUTOLOGIN: "true"
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true"'
+  before_script:
+    - dnf install -y --setopt=install_weak_deps=False git python3 gnupg2 rpm-sign createrepo_c dpkg
   script:
-    - sh scripts/publish-release.sh
+    - bash scripts/release-ci.sh
+  artifacts:
+    expire_in: 30 days
+    paths: [dist/, public/]
+
+repository-check:
+  stage: repository-check
+  parallel:
+    matrix:
+      - TARGET_DISTRO: fedora43
+        BUILD_IMAGE: fedora:43
+      - TARGET_DISTRO: fedora44
+        BUILD_IMAGE: fedora:44
+      - TARGET_DISTRO: debian13
+        BUILD_IMAGE: debian:trixie-slim
+      - TARGET_DISTRO: ubuntu26.04
+        BUILD_IMAGE: ubuntu:26.04
+  image: $BUILD_IMAGE
+  needs: [release]
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true"'
+  script:
+    - bash scripts/check-native-repository.sh
+
+package-repository:
+  stage: deploy
+  image: python:3.13-slim-trixie
+  needs:
+    - job: release
+    - job: repository-check
+      artifacts: false
+  interruptible: false
+  resource_group: tailtray-release
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true" && $TAILTRAY_PUBLISH_REPOSITORY == "1"'
+  script:
+    - python3 scripts/check-repository-deploy.py
+  pages:
+    publish: public

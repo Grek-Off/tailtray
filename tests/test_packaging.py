@@ -1,7 +1,9 @@
 from pathlib import Path
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import tomllib
 import unittest
 
@@ -13,6 +15,23 @@ BUILD_SCRIPT = PROJECT_DIR / "scripts" / "build-packages.sh"
 
 
 class PackagingTests(unittest.TestCase):
+    def _host_target(self):
+        os_release = {}
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                os_release[key] = value.strip('"')
+        return {
+            ("fedora", "43"): "fedora43",
+            ("fedora", "44"): "fedora44",
+            ("debian", "13"): "debian13",
+            ("ubuntu", "26.04"): "ubuntu26.04",
+        }.get((os_release.get("ID"), os_release.get("VERSION_ID")))
+
+    def _dist_snapshot(self):
+        dist = PROJECT_DIR / "dist"
+        return {path.name for path in dist.iterdir()} if dist.exists() else set()
+
     def test_all_package_versions_match_project(self):
         version = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text())["project"]["version"]
         rpm_version = re.search(r"^Version:\s+(\S+)", SPEC.read_text(), re.MULTILINE).group(1)
@@ -24,6 +43,91 @@ class PackagingTests(unittest.TestCase):
                                 env=dict(os.environ, CI_COMMIT_TAG="v99999.0.0"))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Release tag must match", result.stderr)
+
+    def test_target_boundary_rejects_unknown_target_before_dist_creation(self):
+        before = self._dist_snapshot()
+        result = subprocess.run(
+            ["bash", str(BUILD_SCRIPT), "rpm"],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, TARGET_DISTRO="fedora42"),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unsupported TARGET_DISTRO", result.stderr)
+        self.assertEqual(self._dist_snapshot(), before)
+
+    def test_target_boundary_rejects_fake_cross_build_before_dist_creation(self):
+        host_target = self._host_target()
+        if host_target not in {"fedora43", "fedora44"}:
+            self.skipTest("host is not a supported Fedora packaging host")
+        other_target = "fedora43" if host_target == "fedora44" else "fedora44"
+        before = self._dist_snapshot()
+        result = subprocess.run(
+            ["bash", str(BUILD_SCRIPT), "rpm"],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, TARGET_DISTRO=other_target),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cross-builds are unsupported", result.stderr)
+        self.assertEqual(self._dist_snapshot(), before)
+
+    def test_fake_rpmbuild_receives_target_macro_and_preserves_package_version(self):
+        host_target = self._host_target()
+        if host_target not in {"fedora43", "fedora44"}:
+            self.skipTest("host is not a supported Fedora packaging host")
+        version = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text())["project"]["version"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tool_dir = Path(temp_dir)
+            # Build a disposable repository: never overwrite or remove real
+            # dist files, and work when the checkout is mounted read-only.
+            fixture = tool_dir / "project"
+            (fixture / "scripts").mkdir(parents=True)
+            shutil.copy2(BUILD_SCRIPT, fixture / "scripts/build-packages.sh")
+            shutil.copy2(PROJECT_DIR / "pyproject.toml", fixture)
+            shutil.copytree(PROJECT_DIR / "packaging", fixture / "packaging")
+            for arguments in (
+                ["init", "-q"], ["add", "."],
+                ["-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "-qm", "fixture"],
+            ):
+                subprocess.run(["git", "-C", str(fixture), *arguments], check=True, capture_output=True)
+            args_file = tool_dir / "rpmbuild.args"
+            fake_rpmbuild = tool_dir / "rpmbuild"
+            fake_rpmbuild.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "printf '%s\\n' \"$@\" > \"$FAKE_RPM_ARGS\"\n"
+                "top=\n"
+                "for ((i=1; i<=$#; i++)); do\n"
+                "  if [[ ${!i} == --define ]]; then\n"
+                "    ((i++)); value=${!i}; case $value in _topdir\\ *) top=${value#_topdir };; esac\n"
+                "  fi\n"
+                "done\n"
+                "mkdir -p \"$top/RPMS/noarch\" \"$top/SRPMS\"\n"
+                "touch \"$top/RPMS/noarch/tailtray-${FAKE_PACKAGE_VERSION}-1.fc${TARGET_DISTRO#fedora}.noarch.rpm\"\n"
+                "touch \"$top/SRPMS/tailtray-${FAKE_PACKAGE_VERSION}-1.fc${TARGET_DISTRO#fedora}.src.rpm\"\n",
+                encoding="utf-8",
+            )
+            fake_rpmbuild.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(fixture / "scripts/build-packages.sh"), "rpm"],
+                capture_output=True,
+                text=True,
+                env=dict(
+                    os.environ,
+                    PATH=f"{tool_dir}:{os.environ['PATH']}",
+                    TARGET_DISTRO=host_target,
+                    FAKE_RPM_ARGS=str(args_file),
+                    FAKE_PACKAGE_VERSION=version,
+                ),
+            )
+            args = args_file.read_text(encoding="utf-8")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fedora_release = f"fc{host_target.removeprefix('fedora')}"
+            self.assertIn(f"dist .{fedora_release}", args)
+            names = {path.name for path in (fixture / "dist").iterdir()}
+            self.assertIn(f"tailtray-{version}-1.{fedora_release}.noarch.rpm", names)
+            self.assertIn(f"tailtray-{version}-1.{fedora_release}.src.rpm", names)
 
     def test_build_interface_and_reproducible_source_archive_are_declared(self):
         script = BUILD_SCRIPT.read_text(encoding="utf-8")
