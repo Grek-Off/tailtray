@@ -6,8 +6,9 @@ import os
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QCoreApplication, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from PySide6.QtDBus import QDBusConnection, QDBusMessage, QDBusPendingCallWatcher
+from shiboken6 import Shiboken
 
 from tailtray.status_notifier import STATUS_NOTIFIER_PATH, MenuOnlyStatusNotifier
 
@@ -22,6 +23,15 @@ def debug(message: str) -> None:
 
 def main() -> int:
     application = QCoreApplication([])
+    try:
+        return run_probe(application)
+    finally:
+        # Join Qt's D-Bus thread before Python finalization destroys wrappers.
+        Shiboken.delete(application)
+        debug("Qt application destroyed")
+
+
+def run_probe(application: QCoreApplication) -> int:
     server = QDBusConnection.connectToBus(
         QDBusConnection.BusType.SessionBus,
         f"tailtray-left-click-server-{os.getpid()}",
@@ -85,14 +95,29 @@ def main() -> int:
         application.quit()
 
     QTimer.singleShot(0, dispatch_next)
-    QTimer.singleShot(5_000, timed_out)
+    timeout = QTimer(application)
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(timed_out)
+    timeout.start(5_000)
     application.exec()
     debug(f"event loop exited with {result['code']}")
+    timeout.stop()
+    timeout.timeout.disconnect(timed_out)
     server.unregisterObject(STATUS_NOTIFIER_PATH)
     server.unregisterService(service)
     QDBusConnection.disconnectFromBus(client.name())
     QDBusConnection.disconnectFromBus(server.name())
-    debug("connections disconnected")
+    # Live handles/pending calls can keep the connection's thread alive after
+    # disconnectFromBus. Tear down Python-backed objects while Python is alive.
+    for watcher in watchers:
+        watcher.finished.disconnect(call_finished)
+        watcher.deleteLater()
+    watchers.clear()
+    notifier.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    client = None
+    server = None
+    debug("connection handles released")
     return result["code"]
 
 

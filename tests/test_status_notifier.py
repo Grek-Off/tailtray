@@ -70,23 +70,18 @@ class StatusNotifierTests(unittest.TestCase):
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(project_dir / "src")
         environment["TAILTRAY_PROBE_DEBUG"] = "1"
-        completed = subprocess.run(
-            [
-                shutil.which("dbus-run-session"),
-                "--",
-                sys.executable,
-                str(project_dir / "tests" / "status_notifier_dbus_probe.py"),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=environment,
-            check=False,
-        )
-
-        if completed.returncode == 127 and "Failed to start message bus" in completed.stderr:
-            self.skipTest("sandbox does not permit a temporary D-Bus Unix socket")
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        # Each process must survive both callbacks AND interpreter teardown.
+        # This is a repetition regression check, never a retry of failed tests.
+        for attempt in range(100):
+            with self.subTest(process=attempt + 1):
+                completed = subprocess.run(
+                    [shutil.which("dbus-run-session"), "--", sys.executable,
+                     str(project_dir / "tests" / "status_notifier_dbus_probe.py")],
+                    capture_output=True, text=True, timeout=10, env=environment, check=False,
+                )
+                if completed.returncode == 127 and "Failed to start message bus" in completed.stderr:
+                    self.skipTest("sandbox does not permit a temporary D-Bus Unix socket")
+                self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":
