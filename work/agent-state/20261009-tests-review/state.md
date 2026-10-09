@@ -38,6 +38,10 @@ Do not operate the live VPN or rotate/read the release signing secret.
 - New CI runs installed package runtime on4 native distros plus signed-repo
   rehearsal/4 consumers on branches before protected-tag publication. Need
   actual new CI proof; local report/older green pipeline are not that proof.
+- Commit2b59818 pushed; GitLab CI lint valid. Pipeline2930262044 verify/source
+  and both Fedora runtime jobs PASS. Debian/Ubuntu smoke failed on PNG byte
+  equality after dh_strip_nondeterminism; compare decoded RGBA pixels and size
+  instead. Keep the visual integrity assertion, not the encoding assumption.
 
 ## Next
 

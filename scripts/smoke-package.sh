@@ -33,6 +33,14 @@ esac
 python3 - <<'PY'
 import sys
 from pathlib import Path
+from PySide6 import QtCore, QtGui, QtWidgets, QtDBus
+
+def icon_pixels(path):
+    image = QtGui.QImage(str(path))
+    assert not image.isNull(), f'Unreadable icon: {path}'
+    image = image.convertToFormat(QtGui.QImage.Format.Format_RGBA8888)
+    return image.width(), image.height(), bytes(image.constBits())
+
 for relative in ('/usr/bin/tailtray', '/usr/share/applications/io.github.tailtray.desktop',
                  '/usr/share/metainfo/io.github.tailtray.metainfo.xml'):
     assert Path(relative).is_file(), f'Missing installed package file: {relative}'
@@ -41,7 +49,9 @@ for source in Path('src/tailtray').glob('*.py'):
     assert target.is_file() and target.read_bytes() == source.read_bytes(), f'Installed module mismatch: {source.name}'
 for source in Path('data/tray-icons').glob('*.png'):
     target = Path('/usr/share/tailtray/icons') / source.name
-    assert target.is_file() and target.read_bytes() == source.read_bytes(), f'Installed icon mismatch: {source.name}'
+    # Debian's dh_strip_nondeterminism normalizes PNG metadata; visual pixels
+    # must stay identical even when the encoded file's bytes change.
+    assert target.is_file() and icon_pixels(target) == icon_pixels(source), f'Installed icon mismatch: {source.name}'
 sys.path.insert(0, '/usr/lib/tailtray')
 import gi
 gi.require_version('Gtk', '3.0')
@@ -49,7 +59,6 @@ gi.require_version('AyatanaAppIndicator3', '0.1')
 gi.require_version('Secret', '1')
 gi.require_version('Notify', '0.7')
 from gi.repository import Gtk, AyatanaAppIndicator3, Secret, Notify
-from PySide6 import QtCore, QtGui, QtWidgets, QtDBus
 import tailtray.launcher
 import tailtray.qt_app
 import tailtray.app
