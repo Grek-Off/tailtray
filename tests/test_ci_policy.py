@@ -12,10 +12,12 @@ import xml.etree.ElementTree as ET
 
 @unittest.skipUnless(importlib.util.find_spec("pytest"), "pytest development tools not installed")
 class CIPolicyTests(unittest.TestCase):
-    def run_fixture(self, source, *, strict=True):
+    def run_fixture(self, source, *, strict=True, control=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "test_policy_fixture.py").write_text(source)
+            if control:
+                (root / "test_control.py").write_text("def test_control():\n    assert True\n")
             shutil.copy2(Path(__file__).with_name("conftest.py"), root / "conftest.py")
             env = {**os.environ, "TAILTRAY_TEST_STRICT": "1" if strict else "0",
                    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
@@ -23,7 +25,7 @@ class CIPolicyTests(unittest.TestCase):
             result = subprocess.run([
                 sys.executable, "-m", "pytest", "-q", "-c", "/dev/null", "--rootdir", str(root),
                 "--confcutdir", str(root), "-p", "pytest_timeout", "--timeout=0.2",
-                "--junitxml", str(root / "report.xml"), str(root / "test_policy_fixture.py"),
+                "--junitxml", str(root / "report.xml"), str(root),
             ], env=env, capture_output=True, text=True, timeout=10)
             return result, ET.parse(root / "report.xml").getroot()
 
@@ -37,6 +39,14 @@ class CIPolicyTests(unittest.TestCase):
         result, report = self.run_fixture('import pytest\ndef test_optional():\n    pytest.skip("no desktop")\n', strict=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(report.findall(".//skipped")), 1)
+
+    def test_strict_collection_skip_is_error_even_when_other_tests_pass(self):
+        result, report = self.run_fixture(
+            'import pytest\npytest.skip("missing native module", allow_module_level=True)\n', control=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(report.findall(".//error")), 1)
+        self.assertEqual(len(report.findall(".//skipped")), 0)
+        self.assertIn("Unexpected CI skip", result.stdout)
 
     def test_hanging_fixture_is_terminated_and_reported(self):
         result, report = self.run_fixture('import time\ndef test_hang():\n    time.sleep(60)\n')

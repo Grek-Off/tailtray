@@ -16,14 +16,25 @@ def pytest_sessionstart(session):
             raise pytest.UsageError("Package tests imported checkout code instead of the installed package")
 
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_logreport(report):
+def _reject_ci_skip(report):
     if os.environ.get("TAILTRAY_TEST_STRICT") == "1" and report.skipped:
         _strict_skips.append(report.nodeid)
         # Pytest will count this as failure and emit its reason in JUnit, even
         # for unittest.skipTest. Missing GTK/Qt/KDE/D-Bus is a CI failure.
         report.outcome = "failed"
         report.longrepr = f"Unexpected CI skip in {report.nodeid}: {report.longrepr}"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_logreport(report):
+    _reject_ci_skip(report)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collectreport(report):
+    # importorskip/module-level skip happens during collection, before there
+    # is any runtest report. A passing sibling test must not hide that skip.
+    _reject_ci_skip(report)
 
 
 def pytest_sessionfinish(session, exitstatus):

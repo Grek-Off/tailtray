@@ -52,6 +52,10 @@ Do not operate the live VPN or rotate/read the release signing secret.
   in this regression. Need actual corrected publication proof, not a mock PASS.
 - Preserve tagv0.1.2; next releasev0.1.3. Sync package/AppStream/public Python
   versions and assert the public version too (it was stale0.1.0).
+- Commitf7bf27b pushed;45 release/repository/packaging tests PASS under512MiB.
+  Found a second CI policy gap: module-level/importorskip collection skip was
+  hidden by passing sibling tests (reproduced exit0). Handle collect reports
+  too and assert nonzero exit/JUnit error/no skipped record in a tiny fixture.
 
 ## Next
 
