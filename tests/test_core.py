@@ -82,7 +82,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(snapshot.exit_nodes[0].selected)
         self.assertEqual(snapshot.exit_nodes[0].target, "100.100.1.1")
         self.assertTrue(snapshot.exit_node_active)
-        self.assertFalse(snapshot.degraded)
+        self.assertFalse(snapshot.has_health_warnings)
         self.assertEqual(snapshot.exit_node_state, "active")
 
     def test_exit_node_is_not_active_when_tailnet_or_exit_node_is_offline(self):
@@ -99,13 +99,14 @@ class CoreTests(unittest.TestCase):
         self.assertIn("exit node unavailable", exit_node_offline.display_status)
         self.assertEqual(exit_node_offline.exit_node_state, "unavailable")
 
-    def test_running_status_uses_health_not_self_control_poll(self):
+    def test_running_status_does_not_infer_transport_failure_from_health(self):
         unhealthy_payload = json.loads(json.dumps(STATUS))
         unhealthy_payload["Health"] = ["derp connection unavailable"]
         unhealthy = parse_status(unhealthy_payload)
         self.assertTrue(unhealthy.connected)
-        self.assertFalse(unhealthy.exit_node_active)
-        self.assertIn("degraded", unhealthy.display_status)
+        self.assertTrue(unhealthy.has_health_warnings)
+        self.assertTrue(unhealthy.exit_node_active)
+        self.assertEqual(unhealthy.display_status, "Connected to example.com · warnings")
 
         offline_payload = json.loads(json.dumps(STATUS))
         offline_payload["Self"]["Online"] = False
@@ -115,7 +116,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(offline.devices[0].online)
         self.assertTrue(offline.exit_node_active)
         self.assertTrue(offline.display_status.startswith("Connected"))
-        self.assertFalse(offline.degraded)
+        self.assertFalse(offline.has_health_warnings)
         self.assertEqual(offline.exit_node_state, "active")
 
         missing_online = json.loads(json.dumps(STATUS))
@@ -137,6 +138,38 @@ class CoreTests(unittest.TestCase):
         missing_exit_online = json.loads(json.dumps(STATUS))
         del missing_exit_online["ExitNodeStatus"]["Online"]
         self.assertEqual(parse_status(missing_exit_online).exit_node_state, "unknown")
+
+    def test_health_does_not_override_explicit_exit_node_availability(self):
+        warning = ("Unable to connect to the Tailscale coordination server to synchronize "
+                   "the state of your tailnet. Peer reachability might degrade over time.")
+        for online, expected in ((True, "active"), (False, "unavailable"), (None, "unknown")):
+            with self.subTest(online=online):
+                payload = json.loads(json.dumps(STATUS))
+                payload["Health"] = [warning]
+                if online is None:
+                    del payload["ExitNodeStatus"]["Online"]
+                else:
+                    payload["ExitNodeStatus"]["Online"] = online
+                snapshot = parse_status(payload)
+                self.assertTrue(snapshot.connected)
+                self.assertEqual(snapshot.exit_node_state, expected)
+                self.assertEqual(snapshot.health, (warning,))
+                self.assertTrue(snapshot.display_status.startswith("Connected to example.com"))
+                self.assertIn("warnings", snapshot.display_status)
+
+    def test_health_is_fresh_even_when_preference_metadata_is_cached(self):
+        payload = json.loads(json.dumps(STATUS))
+        payload["Health"] = ["coordination server unavailable"]
+        cli = TailscaleCLI(runner=lambda args, timeout: CommandResult(
+            stdout=json.dumps(payload) if args[1] == "status" else "{}"))
+        with patch("tailtray.core.time.monotonic", return_value=10):
+            first = cli.snapshot()
+            payload["Health"] = []
+            second = cli.snapshot()
+        self.assertTrue(first.has_health_warnings)
+        self.assertFalse(second.has_health_warnings)
+        self.assertEqual(second.display_status, "Connected to example.com")
+        self.assertTrue(second.exit_node_active)
 
     def test_generic_hostname_uses_magicdns_device_name(self):
         payload = json.loads(json.dumps(STATUS))

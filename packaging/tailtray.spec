@@ -1,5 +1,5 @@
 Name:           tailtray
-Version:        0.1.1
+Version:        0.1.2
 Release:        1%{?dist}
 Summary:        Native tray controller for the Tailscale daemon
 License:        MIT
@@ -56,6 +56,10 @@ done
 %{_datadir}/tailtray/icons/tailtray-hc-v2-*.png
 
 %changelog
+* Fri Oct 09 2026 TailTray contributors <codex@local> - 0.1.2-1
+- Keep tunnel availability separate from daemon health warnings
+- Fix nested immutable artifact paths in release publication
+
 * Fri Oct 09 2026 TailTray contributors <codex@local> - 0.1.1-1
 - Signed multi-distribution releases and package repositories
 - Require GTK introspection typelibs on clean installations

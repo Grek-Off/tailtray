@@ -18,6 +18,18 @@ def flatten(items):
 
 
 class MenuModelTests(unittest.TestCase):
+    def test_fresh_health_warning_is_not_a_stale_or_failed_tunnel(self):
+        for warning in ("coordination server unavailable", "DNS resolver unavailable", "update failed"):
+            with self.subTest(warning=warning):
+                snapshot = Snapshot(backend_state="Running", exit_node_id="exit", exit_node_online=True,
+                                    health=(warning,))
+                model = {e.key: e for e in flatten(entries(snapshot))}
+                self.assertEqual(model["status"].label, "Connected · warnings")
+                self.assertEqual(model["exit-nodes"].label, "Exit node: exit")
+                self.assertNotIn("last reported", model["devices"].label)
+                self.assertEqual(model["health"].label, f"⚠ {warning}")
+                self.assertEqual(model["connection"].command, "disconnect")
+
     def test_operator_recovery_keeps_network_observation_and_useful_actions(self):
         snapshot = Snapshot(backend_state="Running", control_error_kind="permission")
         model = {e.key: e for e in flatten(entries(snapshot))}

@@ -134,7 +134,13 @@ class Snapshot:
         return self.backend_state == "Running" and not self.error and not self.error_kind
 
     @property
-    def degraded(self) -> bool:
+    def has_health_warnings(self) -> bool:
+        """Daemon diagnostics are independent of IPN/tunnel availability.
+
+        Health is an unstructured list: DNS, update and control-plane warnings
+        do not prove that the current tunnel or exit node has stopped working.
+        Never infer transport failure from the presence of a warning.
+        """
         return self.connected and bool(self.health)
 
     @property
@@ -160,7 +166,7 @@ class Snapshot:
             return "inactive"
         if not self.exit_node_id:
             return "unknown"
-        if self.health or self.exit_node_online is None:
+        if self.exit_node_online is None:
             return "unknown"
         return "active" if self.exit_node_online else "unavailable"
 
@@ -185,7 +191,10 @@ class Snapshot:
 
     @property
     def exit_node_active(self) -> bool:
-        """Whether the selected exit node is usable in the current IPN state."""
+        """Whether routing is enabled and Tailscale reports the node online.
+
+        This is daemon-reported availability, not an end-to-end traffic probe.
+        """
         return self.exit_node_state == "active"
 
     @property
@@ -200,10 +209,10 @@ class Snapshot:
             return self.error or "Tailscale status unknown"
         if self.backend_state == "Running":
             status = f"Connected to {self.tailnet}" if self.tailnet else "Connected"
-            if self.health:
-                return "Tailscale enabled · degraded connection"
             if self.exit_node_state == "unavailable":
-                return f"{status} · exit node unavailable"
+                status += " · exit node unavailable"
+            if self.has_health_warnings:
+                status += " · warnings"
             return status
         if self.backend_state == "Starting":
             return "Connecting…"

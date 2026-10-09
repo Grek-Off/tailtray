@@ -11,7 +11,7 @@ is required after it completes.
 | Situation | Presentation and action |
 | --- | --- |
 | Running, healthy | Normal connected state; selected exit node must also report online. |
-| Running with health warnings | Degraded/uncertain availability; keep Disconnect available. Do not cycle down/up. |
+| Running with health warnings | Connected with separate diagnostics; keep explicit ExitNodeStatus availability and Disconnect. Do not infer a tunnel failure or cycle down/up. |
 | Running with Self.Online false or absent, no health warnings | Keep connected presentation; use ExitNodeStatus for reported exit-node availability. |
 | Stopped, user wants connection | One automatic up attempt with bounded retry delay. |
 | Manual Disconnect | Persist disconnected intent; automatic up and login must not undo it. |
@@ -122,7 +122,12 @@ with no selected radio; missing data must not silently mean None.
 
 `Running` means the backend is enabled, not that every destination is reachable.
 `ExitNodeStatus.Online` is the daemon's report that the node is alive; it is not
-an end-to-end Internet probe. Health warnings make availability uncertain.
+an end-to-end Internet probe. Health is an unstructured list of diagnostics,
+not a transport-state field: coordination-server, DNS and update warnings must
+not erase an explicit ExitNodeStatus.Online value. Display `Connected · warnings`
+and keep the actual diagnostic visible; fresh local observations are not marked
+`last reported` merely because Health is nonempty. Health is read on every poll,
+never cached with preferences, and cleared when the daemon stops reporting it.
 `Self.Online` reflects `GetInPollNetMap()`, not tunnel connectivity; false or
 missing values alone must not mark the device offline or invalidate explicit
 exit-node status. The local device marker follows `BackendState == Running`.

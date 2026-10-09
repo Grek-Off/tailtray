@@ -22,22 +22,35 @@ sent asynchronously, unanswered. Do not infer public access from this checkpoint
   base64 file variable TAILTRAY_SIGNING_KEY and protected public fingerprint
   configured; protected v* tags (Maintainer). No private material in source/logs.
 - Public fingerprint D432326D1167240864F8345763FA04F99681DA62.
-- Worker 01a11f5e-3fa3-7121-a551-094ee13d0fd4 currently owns ONLY
-  scripts/build-repository.py and tests/test_repository.py. Main all other files.
+- All packaging/Qt workers finished and closed; main owns integration.
+- HTTP400 worker 01a11ffb-da17-7c31-a40e-36af84ec35ce finished/closed;
+  inspected patch in gitlab_release.py + test_release.py. Main confirmed actual
+  GET encoded nested path = 400, slash-preserving nested path = 404 (missing).
 - Qt worker finished/closed: QMenu wrappers retained, action order compared by
   stable objectName instead of Python is. Existing CI was red with deleted
   QAction on Qt6.10. Targeted cases x50 and suite passed worker reproduction.
 
 ## Current evidence (not final completion)
 
-- Starting HEAD e501b52, clean before this task. No commit/push/tag this task yet.
-- Unit tests packaging + release (21) pass. Matrix tests use temp fixtures, not
-  real dist; no overwrite/removal of user artifacts.
+- Starting HEAD e501b52, clean before this task. Integration HEAD7cf23dc pushed
+  main; pipeline2929730269 succeeded on all six jobs, all four native targets
+  built and installed successfully. Protected v0.1.0/v0.1.1 tags preserved;
+  tag pipelines failed publication, no successful Release yet.
+- v0.1.0 failed missing fetch-previous CLI fingerprint default; fixed in2c89499.
+- v0.1.1 pipeline2929759725 release17054468524 failed Generic nested path GET400.
+  Fix preserves literal slashes and percent-encodes individual segments.
+- Pending next release version0.1.2 synced across TOML/spec/Debian/AppStream.
+- Latest local suite158 tests passed,3 native desktop skips; full native
+  verification is provided by actual GitLab verify job. Temp fixtures isolate
+  package tests from real dist artifacts.
 - Signing CI variables metadata verified protected, signing key masked/hidden.
-- Release container build running session19813, official Fedora44/Ubuntu26.04
-  pull session90927. Older Fedora43/Debian13 build/test images cached.
-- Need review generator, lint/full tests, actual package builds and signed native
-  consumer checks, commit/push, verify CI all targets, then first v0.1.0 release.
+- No active workers/build processes. Need commit/push current patch, wait exact
+  main SHA CI success, tagv0.1.2, verify release publication plus four signed
+  native repository consumers. Do not tag before exact latest main is green.
+- New screenshot issue: Health warning falsely invalidated Running and explicit
+  ExitNodeStatus.Online. Fixed independent diagnostics; warning->clear tested
+  with stable Qt actions/no mutations. Live CLI read2026-10-09 reported Running,
+  Health=[],ExitNodeStatus.Online=true. No live VPN/login/settings mutations.
 - Public update URL not deployed or authorized yet. Do not call repo usable.
 
 ## Sources

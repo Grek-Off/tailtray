@@ -85,12 +85,17 @@ class GitLab:
         except HTTPError as error:
             if missing and error.code == 404:
                 return None
-            raise ValueError(f"GitLab {method} request failed (HTTP {error.code}); no credentials logged") from None
+            raise ValueError(
+                f"GitLab {method} request failed (HTTP {error.code}) at {path}; no credentials logged"
+            ) from None
         except URLError:
             raise ValueError("GitLab is unreachable; publication was not completed") from None
 
     def package_path(self, package, tag, filename):
-        return "/packages/generic/" + "/".join(quote(x, safe="") for x in (package, tag, filename))
+        # Generic package filenames may contain `/` to preserve directory structure.
+        # Encode each path component, not the whole relative filename as one segment.
+        filename_path = "/".join(quote(component, safe="") for component in filename.split("/"))
+        return "/packages/generic/" + "/".join((quote(package, safe=""), quote(tag, safe=""), filename_path))
 
     def upload(self, package, tag, path):
         endpoint = self.package_path(package, tag, path.name)

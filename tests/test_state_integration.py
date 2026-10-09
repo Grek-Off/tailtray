@@ -551,13 +551,28 @@ class StateIntegrationTests(unittest.TestCase):
             self.assertIs(self.action("exit:old"), old_action)
             self.assertEqual(self.controller.executor.pending, [])
 
-    def test_network_warning_does_not_claim_exit_node_definitely_failed(self):
-        self.reply(Snapshot(backend_state="Running", self_online=True,
-                            exit_node_id="exit-1", exit_node_online=True,
-                            health=("Unable to connect to coordination server",)))
-        self.assertIn("Exit node: exit-1 (availability unknown)", self.labels())
-        self.assertIn("Disconnect", self.labels())
-        self.assertEqual(self.controller.executor.pending, [])
+    def test_restart_warning_and_recovery_keep_running_exit_node_and_stable_menu(self):
+        warning = ("Unable to connect to the Tailscale coordination server to synchronize "
+                   "the state of your tailnet. Peer reachability might degrade over time.")
+        for warnings in ((warning,), (), ("DNS resolver unavailable",), ()):
+            with self.subTest(health=warnings):
+                if hasattr(self, "observed_warning_action"):
+                    self.controller.refresh()
+                self.reply(Snapshot(backend_state="Running", self_online=False,
+                                    exit_node_id="exit-1", exit_node_online=True,
+                                    health=warnings))
+                self.assertEqual(self.action("status").text(), "Connected · warnings" if warnings else "Connected")
+                self.assertIn("Exit node: exit-1", self.labels())
+                self.assertFalse(any("last reported" in label for label in self.labels()))
+                self.assertIn("Disconnect", self.labels())
+                self.assertTrue(self.action("connection").isEnabled())
+                self.assertEqual(self.action("health").text(), f"⚠ {warnings[0]}" if warnings else "")
+                self.assertEqual(self.action("health").isVisible(), bool(warnings))
+                if hasattr(self, "observed_warning_action"):
+                    self.assertIs(self.action("health"), self.observed_warning_action)
+                self.observed_warning_action = self.action("health")
+                self.assertTrue(self.controller.snapshot.exit_node_active)
+                self.assertEqual(self.controller.executor.pending, [])
 
     def test_disconnect_clicked_during_connect_wins_and_prevents_reconnect(self):
         self.reply(Snapshot(backend_state="Stopped"))

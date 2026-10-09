@@ -49,7 +49,9 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
 
     devices = tuple(Entry("device:" + d.id, d.label, enabled=bool(d.ips), children=tuple(
         Entry("ip:" + ip, ip, "copy", (ip, d.name)) for ip in d.ips)) for d in s.devices)
-    suffix = " · last reported" if s.degraded else ""
+    # Only a stale/failed local observation makes this menu's data stale. A
+    # daemon Health warning does not invalidate freshly read peer/exit status.
+    suffix = " · last reported" if not current or s.error or s.error_kind else ""
 
     selected_profile = next((p for p in s.profiles if p.selected), None)
     profiles = tuple(Entry("profile:" + p.id, p.tailnet_label, "profile", (p.id,),

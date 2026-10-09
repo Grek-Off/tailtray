@@ -173,8 +173,24 @@ class ReleaseTests(unittest.TestCase):
         (public / "index.html").write_text("generated index")
         release.publish_repository(self.client, public, "v0.1.0")
         self.assertEqual(len(self.client.writes), 3)
+        nested_endpoint = self.client.package_path(
+            "tailtray-repository", "v0.1.0", "downloads/source/tailtray-0.1.0.tar.gz")
+        self.assertIn("/downloads/source/tailtray-0.1.0.tar.gz", nested_endpoint)
+        self.assertNotIn("downloads%2Fsource", nested_endpoint)
+        self.assertIn(("PUT", nested_endpoint), self.client.writes)
         (public / "index.html").write_text("regenerated index, not an immutable release payload")
         release.publish_repository(self.client, public, "v0.1.0")
         self.assertEqual(len(self.client.writes), 3)
         with self.assertRaisesRegex(ValueError, "tagged source"):
             release.publish_repository(self.client, public, "v0.1.1")
+
+    def test_http_error_context_identifies_path_without_credentials(self):
+        client = release.GitLab("https://gitlab.invalid/api/v4", "123", "synthetic-not-a-secret")
+        error = release.HTTPError(
+            "https://gitlab.invalid/api/v4/projects/123/packages/generic/tailtray/v0.1.0/a.txt",
+            400, "Bad Request", {}, None)
+        self.addCleanup(error.close)
+        with patch.object(client.opener, "open", side_effect=error), self.assertRaisesRegex(
+                ValueError, r"GitLab GET request failed \(HTTP 400\).*a\.txt") as raised:
+            client.request("GET", "/packages/generic/tailtray/v0.1.0/a.txt")
+        self.assertNotIn("synthetic-not-a-secret", str(raised.exception))
