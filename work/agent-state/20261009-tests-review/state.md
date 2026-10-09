@@ -115,8 +115,32 @@ Do not operate the live VPN or rotate/read the release signing secret.
 - CI currently uses shared GitLab runners (as existingREADME/CI state says);
   the older requestedVM setup remains unresolved due to missingSSH target.
 
-Next: bounded regression/static/lint, push and run newprotectedv0.1.5 fulltag
-pipeline (all prepublication gates remain mandatory). Verify actual release,
-Pages/native anonymous HTTPS consumers and source integrity/historyv0.1.4.
+## Completed publication / final evidence
+
+- Commit34b965591aa4e9463dc6a7565ed1b6aad96d96df pushed; bounded subset52 tests
+  /33 subtests PASS, Ruff/static/diff and authenticated CI lint PASS.
+  Duplicate branch build skipped by push option only; full protected tag
+  pipelinev0.1.5 ran every mandatory pre/post-publication gate.
+- Pipeline2930998441 SUCCESS:21 jobs,707 JUnit checks,0 failures/errors/skips.
+  Actual GitLab release contains10 expected immutable assets at exacttagSHA.
+  Real signed Registry historyv0.1.4 restored and included without overwriting.
+- Pages deployed2026-10-09T14:41:15.347Z at API-provided unique HTTPSURL.
+  Four anonymous live consumers Fedora43/44,Debian13,Ubuntu26.04 PASS:
+  pinned publickey + actual manifest signer/version + native signedmetadata
+  + native package download/integrity and exactversion0.1.5.
+- Independent host verifier downloaded all10 Releaseassets with auth kept
+  in memory/stripped at cross-host redirects; verified pinned publickey and
+  signed SHA256SUMS, all7 release package/source hashes. Decompressed0.1.5
+  source bytes exactly match gitarchive oftag34b9655.
+- Anonymous Pages verification checked signature ofmanifest and all14
+  immutable payload sizes/hashes for preserved0.1.4 + new0.1.5 history.
+- Final settings: Gitprivate, Pagespublic, GenericRegistryunchanged/private
+  through projectvisibility. Anonymous GitAPI404. No private key rotation/read
+  by agent, no user-host apt/dnf install/trust change, no VPN mutations.
+- Both read-only review workers finished/closed; no pending required release
+  work. OlderVM runner setup not done (SSHtarget unavailable); actual pipeline
+  explicitly uses existingGitLabsharedrunners. Do not claim VMconfigured.
+- Final handoff: commit/push this evidence-only documentation, confirm clean
+  worktree and matchingremoteHEAD; preserve all protectedtags.
 Installed UI module update was completed last turn;
 live menu verification was interrupted and must not be claimed as confirmed.
