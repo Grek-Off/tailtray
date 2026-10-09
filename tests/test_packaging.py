@@ -37,6 +37,8 @@ class PackagingTests(unittest.TestCase):
         rpm_version = re.search(r"^Version:\s+(\S+)", SPEC.read_text(), re.MULTILINE).group(1)
         self.assertEqual(rpm_version, version)
         self.assertTrue((DEBIAN / "changelog").read_text().startswith(f"tailtray ({version}-"))
+        self.assertIn(f'<release version="{version}"',
+                      (PROJECT_DIR / "data/io.github.tailtray.metainfo.xml").read_text())
 
     def test_mismatched_release_tag_fails_before_creating_archive(self):
         result = subprocess.run(["bash", str(BUILD_SCRIPT), "source"], capture_output=True, text=True,
@@ -86,6 +88,8 @@ class PackagingTests(unittest.TestCase):
             shutil.copy2(BUILD_SCRIPT, fixture / "scripts/build-packages.sh")
             shutil.copy2(PROJECT_DIR / "pyproject.toml", fixture)
             shutil.copytree(PROJECT_DIR / "packaging", fixture / "packaging")
+            (fixture / "data").mkdir()
+            shutil.copy2(PROJECT_DIR / "data/io.github.tailtray.metainfo.xml", fixture / "data")
             for arguments in (
                 ["init", "-q"], ["add", "."],
                 ["-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "-qm", "fixture"],
