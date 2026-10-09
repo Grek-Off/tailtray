@@ -7,6 +7,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request
 
 _spec = importlib.util.spec_from_file_location(
@@ -184,9 +186,32 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tagged source"):
             release.publish_repository(self.client, public, "v0.1.1")
 
+    def test_repository_conflict_never_overwrites_payload_or_completes_version(self):
+        public = self.root / "public"
+        source = public / "downloads/source/tailtray-0.1.0.tar.gz"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"source")
+        other = public / "downloads/source/tailtray-0.1.0-1.fc43.src.rpm"
+        other.write_bytes(b"other")
+        manifest = {"schema": 1, "versions": ["0.1.0"], "files": {
+            source.relative_to(public).as_posix(): {"sha256": hashlib.sha256(b"source").hexdigest(), "size": 6},
+            other.relative_to(public).as_posix(): {"sha256": hashlib.sha256(b"other").hexdigest(), "size": 5},
+        }}
+        (public / "manifest.json").write_text(json.dumps(manifest))
+        (public / "manifest.json.asc").write_bytes(b"signature")
+        conflict = self.client.package_path("tailtray-repository", "v0.1.0", other.relative_to(public).as_posix())
+        self.client.storage[conflict] = b"different"
+        with self.assertRaisesRegex(ValueError, "conflict"):
+            release.publish_repository(self.client, public, "v0.1.0")
+        # Generic uploads are not a transaction: harmless new payloads may
+        # precede a conflict. The invariant is no overwrite/completion marker.
+        self.assertEqual(self.client.storage[conflict], b"different")
+        self.assertNotIn(("PUT", conflict), self.client.writes)
+        self.assertFalse(any(path.endswith("/manifest.json.asc") for _, path in self.client.writes))
+
     def test_http_error_context_identifies_path_without_credentials(self):
         client = release.GitLab("https://gitlab.invalid/api/v4", "123", "synthetic-not-a-secret")
-        error = release.HTTPError(
+        error = HTTPError(
             "https://gitlab.invalid/api/v4/projects/123/packages/generic/tailtray/v0.1.0/a.txt",
             400, "Bad Request", {}, None)
         self.addCleanup(error.close)
@@ -194,3 +219,142 @@ class ReleaseTests(unittest.TestCase):
                 ValueError, r"GitLab GET request failed \(HTTP 400\).*a\.txt") as raised:
             client.request("GET", "/packages/generic/tailtray/v0.1.0/a.txt")
         self.assertNotIn("synthetic-not-a-secret", str(raised.exception))
+
+    def test_missing_only_swallows_404_not_forbidden_or_bad_request(self):
+        client = release.GitLab("https://gitlab.invalid/api/v4", "123", "synthetic-not-a-secret")
+        for status in (404, 403, 400):
+            error = HTTPError("https://gitlab.invalid/api/v4/projects/123/releases/v0.1.0", status,
+                              "fixture", {}, None)
+            self.addCleanup(error.close)
+            with patch.object(client.opener, "open", side_effect=error):
+                if status == 404:
+                    self.assertIsNone(client.request("GET", "/releases/v0.1.0", missing=True))
+                else:
+                    with self.assertRaisesRegex(ValueError, rf"HTTP {status}"):
+                        client.request("GET", "/releases/v0.1.0", missing=True)
+
+    def test_download_limit_and_network_failure_are_fail_closed(self):
+        client = release.GitLab("https://gitlab.invalid/api/v4", "123", "synthetic-not-a-secret")
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, amount):
+                self.asserted_amount = amount
+                return b"x" * amount
+
+        response = Response()
+        # Exercise the boundary with a tiny limit, not a 128 MiB allocation.
+        with patch.object(release, "MAX_DOWNLOAD", 64), patch.object(client.opener, "open", return_value=response):
+            with self.assertRaisesRegex(ValueError, "size limit"):
+                client.request("GET", "/large")
+        self.assertEqual(response.asserted_amount, 65)
+        with patch.object(client.opener, "open", side_effect=URLError("offline")):
+            with self.assertRaisesRegex(ValueError, "unreachable"):
+                client.request("GET", "/offline")
+
+    def test_failed_upload_can_be_retried_without_overwriting_completed_payload(self):
+        original = self.client.request
+        failed = False
+
+        def fail_once(method, path, data=None, json_data=None, missing=False):
+            nonlocal failed
+            if method == "PUT" and not failed:
+                failed = True
+                raise ValueError("transient upload failure")
+            return original(method, path, data=data, json_data=json_data, missing=missing)
+
+        self.client.request = fail_once
+        with self.assertRaisesRegex(ValueError, "transient"):
+            release.publish(self.client, self.root, "v0.1.0", self.commit)
+        writes_after_failure = list(self.client.writes)
+        release.publish(self.client, self.root, "v0.1.0", self.commit)
+        self.assertGreater(len(self.client.writes), len(writes_after_failure))
+        self.assertEqual(len({path for method, path in self.client.writes if method == "PUT"}),
+                         len([path for method, path in self.client.writes if method == "PUT"]))
+
+    def test_history_paginates_and_uses_highest_completed_semver_marker(self):
+        first_page = [{"name": "tailtray-repository", "version": f"v1.0.{n}", "status": "default"}
+                      for n in range(100)]
+        second_page = [{"name": "tailtray-repository", "version": "v1.10.0", "status": "default"}]
+        manifest = {"schema": 1, "files": {"downloads/test": {
+            "size": 7, "sha256": hashlib.sha256(b"fixture").hexdigest()}}}
+        calls = []
+        pages = {"1": first_page, "2": second_page}
+
+        def request(method, path, **kwargs):
+            # Two pages, two completion markers, a manifest and its payload.
+            # A broken paginator/fixture must fail before accumulating memory.
+            self.assertLess(len(calls), 6, "History fixture exceeded its six-request budget; pagination loop")
+            calls.append(path)
+            parsed = urlsplit(path)
+            if parsed.path == "/packages":
+                query = parse_qs(parsed.query)
+                self.assertEqual(query.get("per_page"), ["100"])
+                page = query.get("page")
+                self.assertIsNotNone(page, "Pagination request has no page parameter")
+                self.assertEqual(len(page), 1)
+                self.assertIn(page[0], pages, "Unexpected page requested by history paginator")
+                return json.dumps(pages[page[0]]).encode()
+            if "v1.10.0" in path:
+                return None
+            if path.endswith("manifest.json.asc"):
+                return b"signature"
+            if path.endswith("manifest.json"):
+                return json.dumps(manifest).encode()
+            return b"fixture"
+
+        self.client.request = request
+        with patch.object(release.subprocess, "run", return_value=Mock(returncode=0,
+                          stdout="[GNUPG:] VALIDSIG " + "A" * 40 + " 0 0 0")):
+            self.assertTrue(release.fetch_previous(self.client, self.root / "previous", "A" * 40))
+        package_queries = [parse_qs(urlsplit(call).query) for call in calls if urlsplit(call).path == "/packages"]
+        self.assertEqual([query["page"] for query in package_queries], [["1"], ["2"]])
+        self.assertEqual(len(calls), 6)
+        self.assertTrue(any("v1.10.0/manifest.json.asc" in call for call in calls))
+        # Prove the fixture's guard itself works if pagination stops advancing:
+        # a hard assertion on request seven, not a timeout or another OOM.
+        calls.clear()
+        with patch.object(release, "urlencode", return_value="per_page=100&page=1"):
+            with self.assertRaisesRegex(AssertionError, "six-request budget"):
+                release.fetch_previous(self.client, self.root / "loop", "A" * 40)
+        self.assertEqual(len(calls), 6)
+
+    def test_history_rejects_invalid_signature_wrong_signer_path_tamper_and_hash_tamper(self):
+        def run_history(manifest, signer="A" * 40, content=b"fixture"):
+            client = self.client
+            client.request = lambda method, path, **kwargs: (
+                json.dumps([{"name": "tailtray-repository", "version": "v1.0.0", "status": "default"}]).encode()
+                if path.startswith("/packages?") else
+                (b"signature" if path.endswith("manifest.json.asc") else
+                 json.dumps(manifest).encode() if path.endswith("manifest.json") else content))
+            status = Mock(returncode=0 if signer else 1,
+                          stdout=("[GNUPG:] VALIDSIG " + signer + " 0 0 0") if signer else "")
+            with patch.object(release.subprocess, "run", return_value=status):
+                with self.assertRaises(ValueError):
+                    release.fetch_previous(client, self.root / "previous", "A" * 40)
+
+        run_history({"schema": 1, "files": {"../escape": {"size": 7,
+                    "sha256": hashlib.sha256(b"fixture").hexdigest()}}})
+        run_history({"schema": 1, "files": {"downloads/test": {"size": 7,
+                    "sha256": "0" * 64}}})
+        run_history({"schema": 1, "files": {"downloads/test": {"size": 7,
+                    "sha256": hashlib.sha256(b"fixture").hexdigest()}}}, signer="B" * 40)
+        run_history({"schema": 1, "files": {"downloads/test": {"size": 7,
+                    "sha256": hashlib.sha256(b"fixture").hexdigest()}}}, signer="")
+
+    def test_cli_validates_current_action_tag_sha_and_environment(self):
+        with patch.object(release.sys, "argv", ["gitlab_release.py", "release", "--directory", str(self.root)]), \
+                patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(release.main(), 1)
+        env = {"CI_API_V4_URL": "https://gitlab.invalid/api/v4", "CI_PROJECT_ID": "123",
+               "CI_JOB_TOKEN": "synthetic-not-a-secret", "CI_COMMIT_TAG": "v0.1.0", "CI_COMMIT_SHA": self.commit}
+        with patch.dict(os.environ, env, clear=True), patch.object(release.sys, "argv",
+                ["gitlab_release.py", "release", "--directory", str(self.root)]), \
+                patch.object(release, "GitLab", return_value=self.client), patch.object(release, "publish") as publish:
+            self.assertEqual(release.main(), 0)
+        publish.assert_called_once_with(self.client, self.root, "v0.1.0", self.commit)
