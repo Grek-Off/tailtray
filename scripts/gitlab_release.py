@@ -220,9 +220,9 @@ def fetch_previous(client, destination, fingerprint):
 
 
 def publish_repository(client, directory, tag):
-    version = artifact_version(directory)
-    if tag != "v" + version:
-        raise ValueError("Repository tag does not match the common source archive")
+    if not VERSION.fullmatch(tag):
+        raise ValueError("Repository requires a stable version tag")
+    version = tag[1:]
     manifest_path = directory / "manifest.json"
     signature_path = directory / "manifest.json.asc"
     if not manifest_path.is_file() or manifest_path.is_symlink() or not signature_path.is_file() or signature_path.is_symlink():
@@ -230,14 +230,9 @@ def publish_repository(client, directory, tag):
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("schema") != 1 or not isinstance(manifest.get("files"), dict):
         raise ValueError("Unsupported repository manifest")
+    if version not in manifest.get("versions", []) or f"downloads/source/tailtray-{version}.tar.gz" not in manifest["files"]:
+        raise ValueError("Repository manifest does not contain the tagged source archive")
     payloads = []
-    for path in sorted(directory.rglob("*")):
-        if not path.is_file() or path.is_symlink():
-            continue
-        relative = path.relative_to(directory).as_posix()
-        safe_path(relative)
-        if relative not in {"manifest.json", "manifest.json.asc"}:
-            payloads.append((relative, path))
     for name, metadata in manifest["files"].items():
         relative = safe_path(name).as_posix()
         path = directory / relative
@@ -245,6 +240,7 @@ def publish_repository(client, directory, tag):
             raise ValueError("Manifest references a missing or invalid payload")
         if hashlib.sha256(path.read_bytes()).hexdigest() != metadata.get("sha256") or path.stat().st_size != metadata.get("size"):
             raise ValueError("Repository manifest checksum mismatch")
+        payloads.append((relative, path))
     for relative, path in payloads:
         endpoint = client.package_path("tailtray-repository", tag, relative)
         content = path.read_bytes()
@@ -262,7 +258,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("release", "fetch-previous", "repository"))
     parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--fingerprint")
+    parser.add_argument("--fingerprint", default=os.environ.get("TAILTRAY_SIGNING_FINGERPRINT"))
     args = parser.parse_args()
     try:
         client = GitLab(os.environ["CI_API_V4_URL"], os.environ["CI_PROJECT_ID"], os.environ["CI_JOB_TOKEN"])

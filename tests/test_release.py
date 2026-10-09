@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -148,3 +149,32 @@ class ReleaseTests(unittest.TestCase):
         for name in ("../secret", "/etc/file", "a/../b", "a\\b", "a//b", "./file"):
             with self.assertRaises(ValueError):
                 release.safe_path(name)
+
+    def test_real_cli_uses_protected_ci_fingerprint_without_extra_flag(self):
+        env = {"CI_API_V4_URL": "https://gitlab.invalid/api/v4", "CI_PROJECT_ID": "123",
+               "CI_JOB_TOKEN": "synthetic-not-a-secret", "TAILTRAY_SIGNING_FINGERPRINT": "A" * 40}
+        arguments = ["gitlab_release.py", "fetch-previous", "--directory", str(self.root / "previous")]
+        with patch.dict(os.environ, env), patch.object(release.sys, "argv", arguments), \
+                patch.object(release, "GitLab", return_value=self.client), \
+                patch.object(release, "fetch_previous") as fetch:
+            self.assertEqual(release.main(), 0)
+        fetch.assert_called_once_with(self.client, self.root / "previous", "A" * 40)
+
+    def test_repository_upload_uses_nested_source_and_only_immutable_payload(self):
+        public = self.root / "public"
+        source = public / "downloads/source/tailtray-0.1.0.tar.gz"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"source")
+        manifest = {"schema": 1, "versions": ["0.1.0"], "files": {
+            "downloads/source/tailtray-0.1.0.tar.gz": {
+                "sha256": hashlib.sha256(b"source").hexdigest(), "size": 6}}}
+        (public / "manifest.json").write_text(json.dumps(manifest))
+        (public / "manifest.json.asc").write_bytes(b"signature")
+        (public / "index.html").write_text("generated index")
+        release.publish_repository(self.client, public, "v0.1.0")
+        self.assertEqual(len(self.client.writes), 3)
+        (public / "index.html").write_text("regenerated index, not an immutable release payload")
+        release.publish_repository(self.client, public, "v0.1.0")
+        self.assertEqual(len(self.client.writes), 3)
+        with self.assertRaisesRegex(ValueError, "tagged source"):
+            release.publish_repository(self.client, public, "v0.1.1")
