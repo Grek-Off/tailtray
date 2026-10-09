@@ -63,22 +63,25 @@ GitLab Generic Registry сам по себе не является apt/dnf-ре�
 может раздавать эту папку по постоянному HTTPS-адресу. Метаданные APT подписаны
 через `InRelease` / `Release.gpg`; у RPM подписаны пакеты и `repomd.xml`.
 
-Проект сейчас приватный. Публикация Pages по умолчанию **выключена**. Без явно
-разрешённого публичного доступа нельзя обещать обновления обычным `apt`/`dnf`:
-приватная Pages требует авторизации. Не сохраняйте персональный GitLab-токен
-в `.repo`, URL, shell history или plaintext-конфигурацию apt.
+Владелец разрешил публичную раздачу пакетов и исходных архивов. Git-проект и
+Generic Registry остаются приватными; только дерево `public/` раздаётся через
+Pages с доступом `Everyone`. Адрес, полученный из API Pages:
+`https://tailtray-657378.gitlab.io`. Публикацию включает protected-переменная
+`TAILTRAY_PUBLISH_REPOSITORY=1`, а protected `TAILTRAY_REPOSITORY_URL` задаёт
+этот HTTPS-адрес для проверки после deployment. Токен GitLab в apt/dnf не нужен
+и не должен попадать в `.repo`, URL или shell history.
 
-После разрешения владельца: оставьте исходный Git-проект приватным, включите
-для Pages доступ `Everyone`, добавьте защищённую CI-переменную
-`TAILTRAY_PUBLISH_REPOSITORY=1` и запустите pipeline release-тега. При необходимости
-публичные загрузки Generic Registry включаются отдельно; Pages не требует этого.
-Адрес Pages нужно взять из GitLab Deploy → Pages, а не угадывать уникальный домен.
+Каждый защищённый release-тег проходит четыре проверки опубликованного HTTPS
+репозитория: Fedora 43/44, Debian 13 и Ubuntu 26.04. Они анонимно скачивают
+публичный ключ с pinned fingerprint и подписанный manifest текущей версии,
+проверяют индексы штатным apt/dnf и скачивают пакет с проверкой подписи/checksum.
+Эти проверки выполняются только в disposable CI images, не на рабочей машине.
 
 Перед установкой добавьте [официальный репозиторий Tailscale](https://pkgs.tailscale.com/stable/).
 Затем из проверенного checkout выполните (команда совместима с fish):
 
 ```fish
-bash scripts/install-repository.sh https://YOUR-PAGES-REPOSITORY
+bash scripts/install-repository.sh https://tailtray-657378.gitlab.io
 ```
 
 Скрипт проверяет дистрибутив и fingerprint публичного ключа, добавляет только
@@ -97,6 +100,12 @@ sudo apt-get upgrade
 manifest в Generic Registry и проверяет hash каждого файла; сетевые/permission
 ошибки не трактуются как «первый релиз». Старый тег не может откатить Pages к
 репозиторию без более свежего опубликованного релиза.
+
+В Registry неизменяемые payloads хранятся под плоскими именами `payload-<sha256
+пути>`: реальный API GitLab возвращает HTTP 500 для сочетания вложенного пути
+и `+` в имени DEB. Подписанный manifest с `registry_layout=flat-v1` сохраняет
+нативные пути apt/dnf, а восстановление истории проверяет подпись и hash
+каждого файла. Старый manifest без этого поля читается в прежнем формате.
 
 ## Подпись и выпуск следующей версии
 

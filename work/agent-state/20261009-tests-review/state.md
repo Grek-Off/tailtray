@@ -4,7 +4,9 @@
 
 Review redundant/weak tests, improve real regressions, wire CI. Commit changes
 and verify the private GitLab pipeline. Prior release automation remains in
-scope; no public package/source/Pages publication permission. Preserve tags.
+scope. User explicitly authorized public package/source/Pages distribution on
+2026-10-09 after the previous turn. Keep Git and Generic Registry private;
+only the signed package/source/index tree may become public. Preserve tags.
 Do not operate the live VPN or rotate/read the release signing secret.
 
 ## Current evidence / incident
@@ -59,8 +61,34 @@ Do not operate the live VPN or rotate/read the release signing secret.
 
 ## Next
 
-Finish useful test reductions/runtime checks, bounded test runner/JUnit reports,
-secretless signed-repo rehearsal and CI gates. Verify exact pushed SHA green;
-only then protected v0.1.3 release. Do not rewrite existing v0.1.2 tag.
-Public Pages remains off. Installed UI module update was completed last turn;
+- HEAD25821de pipeline2930435645 PASS:11 jobs,695 JUnit checks,0 skips; source
+  suite175 tests/163 subtests and74% coverage. Tagv0.1.3 points exactly there.
+- Tag pipeline2930458673 passed11 verify/build/rehearsal jobs but release
+  job17059600400 failed HTTP500 at the same nested DEB endpoint even after
+  octet-stream fix. That fixed a transport defect, not the whole root cause.
+- Pages currently private, no deployments. API-provided URL:
+  https://tailtray-657378.gitlab.io. No guessed domain, no public endpoint yet.
+- Parent owns all writes/credentials/GitLab settings. Read-only agentMeitner
+  01a120e6-78f2-7c60-af7f-cd18680d54e4 completed/closed. Public output controlled;
+  current native checks only file://, so real anonymous HTTPS apt/dnf check
+  remains required.14 scoped repository/deploy tests passed in that review.
+
+- Bounded real API probe: plain file, nested path without plus, and flat plus
+  filename returned201. Nested plus filename (encoded or literal) returned500.
+  Synthetic package71986892/20261009-2df3225b5145 contained exactly3 files/105
+  bytes; verified metadata and removed only that owned probe after diagnosis.
+- Implemented signed flat-v1 Registry transport names; native paths unchanged.
+  Legacy signed history still supported. Version0.1.4 synchronized, old tags
+  untouched. Added roundtrip/idempotence/path-collision and layout regressions.
+- Native consumer script now refuses non-CI execution; added four anonymous
+  HTTPS consumer jobs after Pages. Key/signature/tag readiness + native package
+  downloads; apt update errors fail closed. Pages expiry explicitly never.
+- Local bounded subset51 PASS/28 subtests, Ruff/bash syntax/diff checks PASS.
+  Authenticated GitLab CI lint valid, no errors/warnings. Public settings and
+  two publishing variables not yet changed (both specific variables absent).
+
+Next: commit/push, verify exact branch pipeline; enable only public Pages and
+two protected nonsecret variables, issue new immutablev0.1.4 tag, verify actual
+release + Pages + anonymous native consumers and downloaded source integrity.
+Installed UI module update was completed last turn;
 live menu verification was interrupted and must not be claimed as confirmed.

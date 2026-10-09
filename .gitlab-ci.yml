@@ -1,4 +1,4 @@
-stages: [verify, source, build, release-test, repository-test, release, repository-check, deploy]
+stages: [verify, source, build, release-test, repository-test, release, repository-check, deploy, live-check]
 
 workflow:
   auto_cancel:
@@ -190,3 +190,26 @@ package-repository:
     - python3 scripts/check-repository-deploy.py
   pages:
     publish: public
+    expire_in: never
+
+repository-live-check:
+  stage: live-check
+  parallel:
+    matrix:
+      - TARGET_DISTRO: fedora43
+        BUILD_IMAGE: fedora:43
+      - TARGET_DISTRO: fedora44
+        BUILD_IMAGE: fedora:44
+      - TARGET_DISTRO: debian13
+        BUILD_IMAGE: debian:trixie-slim
+      - TARGET_DISTRO: ubuntu26.04
+        BUILD_IMAGE: ubuntu:26.04
+  image: $BUILD_IMAGE
+  needs:
+    - job: package-repository
+      artifacts: false
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true" && $TAILTRAY_PUBLISH_REPOSITORY == "1"'
+  script:
+    - test -n "$TAILTRAY_REPOSITORY_URL"
+    - timeout --kill-after=5s 240s env TAILTRAY_NATIVE_REPOSITORY_URL="$TAILTRAY_REPOSITORY_URL" bash scripts/check-native-repository.sh

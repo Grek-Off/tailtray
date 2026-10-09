@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import unittest
@@ -26,6 +27,21 @@ def run_helper(function: str, *arguments: str) -> subprocess.CompletedProcess[st
 
 
 class InstallationTests(unittest.TestCase):
+    def test_native_repository_checker_refuses_host_mutations_and_credential_urls(self):
+        script = PROJECT_DIR / "scripts/check-native-repository.sh"
+        for ci, url, message in (
+            ("false", "https://example.invalid", "disposable CI"),
+            ("true", "https://token@example.invalid", "credential-free HTTPS"),
+            ("true", "http://example.invalid", "credential-free HTTPS"),
+            ("true", "https://example.invalid/?token=synthetic", "credential-free HTTPS"),
+        ):
+            with self.subTest(ci=ci, url=url):
+                result = subprocess.run(["bash", str(script)], env={**os.environ, "CI": ci,
+                    "TARGET_DISTRO": "fedora44", "TAILTRAY_NATIVE_REPOSITORY_URL": url},
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(message, result.stderr)
+
     def test_process_matcher_accepts_fedora_python_versions_only_for_installed_launcher(self):
         accepted = (
             ("/usr/bin/python3", "/usr/bin/tailtray"),

@@ -102,6 +102,7 @@ class RepositoryTests(unittest.TestCase):
                 },
             }, {"1.0.0"})
             data = json.loads((root / "manifest.json").read_text())
+            self.assertEqual(data["registry_layout"], "flat-v1")
             self.assertEqual(data["files"], {
                 "downloads/source/tailtray-1.0.0.tar.gz": {"sha256": "a" * 64, "size": 3},
             })

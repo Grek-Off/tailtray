@@ -264,6 +264,7 @@ def merge_file(source: Path, relative: str, destination_root: Path, manifest: di
 def write_manifest(root: Path, manifest: dict[str, dict[str, object]], versions: set[str]) -> None:
     data = {
         "schema": 1,
+        "registry_layout": "flat-v1",
         "files": {
             key: {"sha256": manifest[key]["sha256"], "size": manifest[key]["size"]}
             for key in sorted(manifest)

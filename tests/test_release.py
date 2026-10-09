@@ -211,6 +211,46 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn(("PUT", conflict), self.client.writes)
         self.assertFalse(any(path.endswith("/manifest.json.asc") for _, path in self.client.writes))
 
+    def test_flat_registry_roundtrip_preserves_signed_paths_and_distinct_basenames(self):
+        public = self.root / "public"
+        names = ("downloads/source/tailtray-0.1.0.tar.gz",
+                 "apt/pool/main/t/tailtray/tailtray_0.1.0-1+debian13_all.deb",
+                 "downloads/other/tailtray_0.1.0-1+debian13_all.deb")
+        manifest = {"schema": 1, "registry_layout": "flat-v1", "versions": ["0.1.0"], "files": {}}
+        for name in names:
+            path = public / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(name.encode())
+            manifest["files"][name] = {"sha256": hashlib.sha256(name.encode()).hexdigest(), "size": len(name)}
+        signed_bytes = json.dumps(manifest).encode()
+        (public / "manifest.json").write_bytes(signed_bytes)
+        (public / "manifest.json.asc").write_bytes(b"signature")
+        release.publish_repository(self.client, public, "v0.1.0")
+        before = list(self.client.writes)
+        release.publish_repository(self.client, public, "v0.1.0")
+        self.assertEqual(before, self.client.writes)
+        payloads = [path for _, path in before if "/payload-" in path]
+        self.assertEqual(len(set(payloads)), 3)
+        self.assertTrue(all(path.rsplit("/", 1)[1].startswith("payload-") and "+" not in path for path in payloads))
+        self.assertEqual(self.client.storage[self.client.package_path(
+            "tailtray-repository", "v0.1.0", "manifest.json")], signed_bytes)
+        self.client.storage["/packages?package_name=tailtray-repository&package_type=generic&per_page=100&page=1"] = json.dumps(
+            [{"name": "tailtray-repository", "version": "v0.1.0", "status": "default"}]).encode()
+        with patch.object(release.subprocess, "run", return_value=Mock(
+                returncode=0, stdout="[GNUPG:] VALIDSIG " + "A" * 40 + " 0 0 0")):
+            release.fetch_previous(self.client, self.root / "previous", "A" * 40)
+        for name in names:
+            self.assertEqual((self.root / "previous" / name).read_bytes(), name.encode())
+
+    def test_unknown_registry_layout_is_rejected_before_upload(self):
+        public = self.root / "public"
+        public.mkdir()
+        (public / "manifest.json").write_text(json.dumps({"schema": 1, "files": {}, "registry_layout": "future"}))
+        (public / "manifest.json.asc").write_bytes(b"signature")
+        with self.assertRaisesRegex(ValueError, "registry layout"):
+            release.publish_repository(self.client, public, "v0.1.0")
+        self.assertEqual(self.client.writes, [])
+
     def test_http_error_context_identifies_path_without_credentials(self):
         client = release.GitLab("https://gitlab.invalid/api/v4", "123", "synthetic-not-a-secret")
         error = HTTPError(

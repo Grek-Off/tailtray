@@ -162,6 +162,21 @@ def safe_path(name):
     return path
 
 
+def registry_layout(manifest):
+    layout = manifest.get("registry_layout", "paths")
+    if layout not in ("paths", "flat-v1"):
+        raise ValueError("Unsupported repository registry layout")
+    return layout
+
+
+def repository_payload_path(client, tag, name, layout):
+    # GitLab currently returns HTTP 500 for nested filenames containing `+`.
+    # Keep native repository paths in the signed manifest, not in the transport
+    # name. Hash the whole path so identical basenames cannot collide.
+    filename = "payload-" + hashlib.sha256(name.encode()).hexdigest() if layout == "flat-v1" else name
+    return client.package_path("tailtray-repository", tag, filename)
+
+
 def fetch_previous(client, destination, fingerprint):
     fingerprint = fingerprint.replace(" ", "").upper()
     if not FINGERPRINT.fullmatch(fingerprint):
@@ -212,12 +227,13 @@ def fetch_previous(client, destination, fingerprint):
         manifest = json.loads((staging / "manifest.json").read_text())
         if manifest.get("schema") != 1 or not isinstance(manifest.get("files"), dict):
             raise ValueError("Unsupported repository manifest")
+        layout = registry_layout(manifest)
         for name, metadata in manifest["files"].items():
             relative = safe_path(name)
             if (not isinstance(metadata, dict) or not re.fullmatch(r"[0-9a-f]{64}", str(metadata.get("sha256", "")))
                     or not isinstance(metadata.get("size"), int)):
                 raise ValueError("Invalid previous repository manifest entry")
-            content = client.request("GET", client.package_path("tailtray-repository", tag, name))
+            content = client.request("GET", repository_payload_path(client, tag, name, layout))
             if hashlib.sha256(content).hexdigest() != metadata["sha256"] or len(content) != metadata["size"]:
                 raise ValueError("Previous repository content failed integrity validation")
             target = staging.joinpath(*relative.parts)
@@ -239,6 +255,7 @@ def publish_repository(client, directory, tag):
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("schema") != 1 or not isinstance(manifest.get("files"), dict):
         raise ValueError("Unsupported repository manifest")
+    layout = registry_layout(manifest)
     if version not in manifest.get("versions", []) or f"downloads/source/tailtray-{version}.tar.gz" not in manifest["files"]:
         raise ValueError("Repository manifest does not contain the tagged source archive")
     payloads = []
@@ -251,7 +268,7 @@ def publish_repository(client, directory, tag):
             raise ValueError("Repository manifest checksum mismatch")
         payloads.append((relative, path))
     for relative, path in payloads:
-        endpoint = client.package_path("tailtray-repository", tag, relative)
+        endpoint = repository_payload_path(client, tag, relative, layout)
         content = path.read_bytes()
         old = client.request("GET", endpoint, missing=True)
         if old is not None and old != content:
