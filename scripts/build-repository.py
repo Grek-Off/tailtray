@@ -348,8 +348,8 @@ def build_apt_metadata(root: Path, now: str) -> None:
         for algorithm in ("SHA256", "SHA512"):
             hasher = sha256 if algorithm == "SHA256" else sha512
             for relative in [
-                f"main/binary-amd64/Packages", f"main/binary-amd64/Packages.gz",
-                f"main/binary-arm64/Packages", f"main/binary-arm64/Packages.gz",
+                "main/binary-amd64/Packages", "main/binary-amd64/Packages.gz",
+                "main/binary-arm64/Packages", "main/binary-arm64/Packages.gz",
             ]:
                 path = release.parent / relative
                 hashes.append((algorithm, hasher(path), path.stat().st_size, relative))
