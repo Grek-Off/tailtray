@@ -207,7 +207,7 @@ operator и не запускает сервисы автоматически.
 socket не нужны. На каждом целевом дистрибутиве CI устанавливает пакет и
 проверяет импорт Qt/GTK/D-Bus-зависимостей.
 
-Для релиза обновите версию в `pyproject.toml`, `packaging/tailtray.spec`,
+Для релиза обновите версию в `pyproject.toml`, `src/tailtray/__init__.py`, `packaging/tailtray.spec`,
 `packaging/debian/changelog` и AppStream `data/io.github.tailtray.metainfo.xml`,
 закоммитьте изменения и отправьте тег `vX.Y.Z`.
 Тег обязан совпадать с версией проекта. Пайплайн создаёт GitLab Release и

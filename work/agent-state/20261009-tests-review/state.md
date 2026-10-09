@@ -98,7 +98,25 @@ Do not operate the live VPN or rotate/read the release signing secret.
   consumer checks actual VALIDSIG signer, installer requires HTTPS redirects,
   retry budget24 with outer240-second timeout. Added safe fake-GPG regression.
 
-Next: verify corrected exact branch pipeline, issue new immutablev0.1.4 tag,
-verify actual release + Pages + anonymous native consumers and source integrity.
+- Commitbecbb5137a4563da4b541d2205f92be8694d9519 branch pipeline2930882385 fully
+  PASS:11 jobs,707 JUnit checks,0 failures/0 skips. Four native builds/runtime
+  suites + actual signed repository rehearsal/history + four apt/dnf consumers.
+- Actual committed public key also passes strict single-primary pin in an
+  isolated temporary GNUPGHOME on the host (no user trust/keyring changes).
+
+- Tagv0.1.4 exactbecbb51 pipeline2930917781:11 verification/rehearsal jobs PASS.
+  Actual repository + all10 immutable release files uploaded successfully;500
+  resolved. POST/releases returned400. Pages/remaining9 jobs skipped.
+- Primary GitLab app/models/releases/link.rb FILEPATH_REGEX excludesplus in
+  optionaldirect_asset_path, unlike Generic Registry filenames. Added contract
+  assertion; reproduced failure on existingDEB alias. Remove optional aliases,
+  retain original linknames and immutable URLs; version0.1.5 synchronized.
+  Preserve tagv0.1.4 and its signed completed Registry history; do not rewrite.
+- CI currently uses shared GitLab runners (as existingREADME/CI state says);
+  the older requestedVM setup remains unresolved due to missingSSH target.
+
+Next: bounded regression/static/lint, push and run newprotectedv0.1.5 fulltag
+pipeline (all prepublication gates remain mandatory). Verify actual release,
+Pages/native anonymous HTTPS consumers and source integrity/historyv0.1.4.
 Installed UI module update was completed last turn;
 live menu verification was interrupted and must not be claimed as confirmed.

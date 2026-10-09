@@ -133,8 +133,11 @@ def publish(client, directory, tag, commit):
     if existing and existing.get("commit", {}).get("id") != commit:
         raise ValueError("Existing release belongs to another commit")
     paths += [directory / x for x in ("SHA256SUMS", "SHA256SUMS.asc", "repository-key.asc")]
+    # Optional direct_asset_path aliases reject '+' in GitLab even though
+    # native DEB filenames and Generic Registry URLs allow it. Link to the
+    # immutable files directly; do not invent renamed download aliases.
     links = [{"name": p.name, "url": client.upload("tailtray", tag, p),
-              "direct_asset_path": "/" + p.name, "link_type": "package"} for p in paths]
+              "link_type": "package"} for p in paths]
     description = (
         "Native Tailscale tray controller. Fedora 43/44 (RPM + source RPM), "
         "Debian 13 and Ubuntu 26.04 (DEB), source .tar.gz and signed SHA256SUMS. "

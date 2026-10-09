@@ -4,6 +4,7 @@ import importlib.util
 from io import BytesIO
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -63,6 +64,14 @@ class ReleaseTests(unittest.TestCase):
         published = json.loads(self.client.storage["/releases/v0.1.0"])
         self.assertEqual(len(published["assets"]["links"]), 10)
         self.assertNotIn("synthetic-not-a-secret", json.dumps(published))
+        # GitLab Releases::Link filepath contract is narrower than Generic
+        # Registry filenames: '+' is valid in DEB URLs but not download aliases.
+        # Optional aliases, if supplied, must pass the real API validation.
+        for link in published["assets"]["links"]:
+            alias = link.get("direct_asset_path")
+            if alias is not None:
+                self.assertLessEqual(len(alias), 128)
+                self.assertRegex(alias, re.compile(r"/[^/](?!.*//)[\-.\w/]+[0-9a-zA-Z]\Z"))
 
     def test_partial_matrix_does_not_publish(self):
         self.paths[-1].unlink()

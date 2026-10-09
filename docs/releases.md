@@ -125,7 +125,7 @@ GitLab хранит base64 ключа в protected/masked/hidden **file** variab
 Публичный ключ и fingerprint другого проекта нужно явно обновить в исходниках
 после проверки. Повторно выполнять setup в уже настроенном проекте не нужно.
 
-Для следующего релиза обновите версии в TOML, RPM spec, Debian changelog и
+Для следующего релиза обновите версии в TOML, `src/tailtray/__init__.py`, RPM spec, Debian changelog и
 AppStream metainfo, проверьте изменения и отправьте:
 
 ```fish
