@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 import fcntl
-import getpass
 import os
 from pathlib import Path
 import subprocess
@@ -28,7 +27,6 @@ from .core import (
     Snapshot,
     TailscaleCLI,
     TailscaleError,
-    privileged_operator_command,
     privileged_restart_service_command,
     privileged_start_service_command,
 )
@@ -181,6 +179,7 @@ class TailTrayQtApp(OperationControllerMixin, QObject):
         self.snapshot = snapshot
         self._update_indicator()
         self._render_menu()
+        self._maybe_prepare_control()
         self._maybe_auto_login()
         self._maybe_auto_reconnect()
 
@@ -243,15 +242,6 @@ class TailTrayQtApp(OperationControllerMixin, QObject):
     @staticmethod
     def open_admin_console() -> None:
         QDesktopServices.openUrl(QUrl("https://login.tailscale.com/admin/machines"))
-
-    def interactive_login(self) -> None:
-        if self.operation_busy:
-            return
-        self._set_connection_intent(True)
-        if self.snapshot.auth_url:
-            QDesktopServices.openUrl(QUrl(self.snapshot.auth_url))
-            return
-        self._action("Sign-in", self.cli.begin_interactive_login, on_success=self._open_login_url)
 
     def _open_login_url(self, url: str) -> None:
         if url:
@@ -338,9 +328,6 @@ class TailTrayQtApp(OperationControllerMixin, QObject):
                 raise TailscaleError(detail or "Could not restart tailscaled.service")
 
         self.cli.full_restart(restart_service)
-
-    def grant_operator(self) -> None:
-        self._privileged_action("Granting Tailscale control", privileged_operator_command(getpass.getuser()))
 
     def _privileged_action(self, description: str, argv: list[str]) -> None:
         def run() -> None:

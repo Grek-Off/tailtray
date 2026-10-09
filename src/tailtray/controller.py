@@ -6,9 +6,11 @@ from concurrent.futures import Future, Executor
 from dataclasses import dataclass
 import time
 import sys
+import os
+import pwd
 from typing import Callable, Any
 
-from .core import ReconnectPolicy
+from .core import ReconnectPolicy, TailscaleError
 from .menu import build_menu, Entry
 from .settings import autostart_enabled
 
@@ -128,6 +130,10 @@ class OperationControllerMixin:
 
     def _init_operation_controller(self, executor: Executor, dispatch: Callable[[Callable[[], None]], None]) -> None:
         self.reconnect_policy = ReconnectPolicy()
+        self.local_user = pwd.getpwuid(os.getuid()).pw_name
+        self._operator_attempted: set[tuple[str, ...]] = set()
+        self._control_denied = False
+        self.action_error = ""
         self.operation_coordinator = OperationCoordinator(executor, dispatch)
         self.operation_coordinator.set_done_handler(self._operation_finished)
 
@@ -150,7 +156,62 @@ class OperationControllerMixin:
         return build_menu(self.snapshot, status=self.display_status, busy=self.operation_busy,
                           operation=self.operation_coordinator.state.name, settings=self.settings,
                           secrets_available=self.secrets.available, has_key=bool(self.auth_key),
-                          autostart=autostart_enabled(), current=self.operation_coordinator.observation_current)
+                          autostart=autostart_enabled(), current=self.operation_coordinator.observation_current,
+                          control_required=self.control_required, action_error=self.action_error)
+
+    @property
+    def control_required(self) -> bool:
+        snapshot = self.snapshot
+        return (self._control_denied or snapshot.error_kind == "permission"
+                or snapshot.control_error_kind == "permission"
+                or (snapshot.operator_user is not None and snapshot.operator_user != self.local_user))
+
+    def _control_context(self) -> tuple[str, ...]:
+        profile = next((p.id for p in self.snapshot.profiles if p.selected), "")
+        return (profile, self.snapshot.tailnet, self.snapshot.hostname)
+
+    def _maybe_prepare_control(self) -> None:
+        if not self.operation_coordinator.observation_current:
+            return
+        context = self._control_context()
+        if not self.control_required:
+            if self.snapshot.operator_user == self.local_user:
+                # Rearm only after verified recovery, not a timeout/absent field.
+                self._operator_attempted.clear()
+            return
+        if self.snapshot.error_kind not in {"", "permission"}:
+            return
+        if self._control_denied and self.snapshot.operator_user == self.local_user:
+            # A write can fail for reasons operator assignment cannot fix.
+            # Offer explicit recovery, never loop polkit + failing login/up.
+            return
+        if context not in self._operator_attempted:
+            self.grant_operator()
+
+    def grant_operator(self, *_args) -> None:
+        if self.operation_busy or not self.operation_coordinator.observation_current:
+            return
+        self._operator_attempted.add(self._control_context())
+
+        def granted(_result) -> None:
+            self._control_denied = False
+            self.login_token = ""
+
+        self._action("Granting Tailscale control", lambda: self.cli.grant_operator(self.local_user),
+                     on_success=granted)
+
+    def interactive_login(self, *_args) -> None:
+        if self.operation_busy or not self.operation_coordinator.observation_current:
+            return
+        if self.control_required:
+            self.grant_operator()
+            return
+        self._set_connection_intent(True)
+        self.login_token = "NeedsLogin"
+        if self.snapshot.auth_url:
+            self._open_login_url(self.snapshot.auth_url)
+            return
+        self._action("Sign-in", self.cli.begin_sign_in, on_success=self._open_login_url)
 
     def _menu_activate(self, entry: Entry, checked: bool = False) -> None:
         if not entry.enabled:
@@ -194,6 +255,13 @@ class OperationControllerMixin:
         return started
 
     def _operation_finished(self, description: str, succeeded: bool, result: Any, error: Exception | None) -> None:
+        if error is not None:
+            self.action_error = f"{description} failed: {error}"
+            if isinstance(error, TailscaleError) and error.kind == "permission":
+                self._control_denied = True
+                self.login_token = ""
+        else:
+            self.action_error = ""
         if error is not None and description != "Automatic reconnect":
             self.notify("TailTray", f"{description} failed: {error}")
         elif error is not None:
@@ -306,7 +374,7 @@ class OperationControllerMixin:
         self._action(description, function)
 
     def _maybe_auto_reconnect(self) -> None:
-        if not self.operation_coordinator.observation_current:
+        if not self.operation_coordinator.observation_current or self.control_required:
             return
         if self.reconnect_policy.should_attempt(
             self.snapshot,
@@ -324,7 +392,7 @@ class OperationControllerMixin:
             return
         if (not self.settings.get("want_connected", True)
                 or not self.operation_coordinator.observation_current
-                or snapshot.error or snapshot.error_kind):
+                or snapshot.error or snapshot.error_kind or self.control_required):
             return
         # URL rotation is not a new login episode. Retry remains available via
         # the explicit Sign in action; polling must never spawn browser tabs.
@@ -337,7 +405,7 @@ class OperationControllerMixin:
         elif snapshot.auth_url:
             self._open_login_url(snapshot.auth_url)
         else:
-            self._action("Sign-in", self.cli.begin_interactive_login, on_success=self._open_login_url)
+            self._action("Sign-in", self.cli.begin_sign_in, on_success=self._open_login_url)
 
     def _operation_shutdown(self) -> None:
         self.operation_coordinator.shutdown()

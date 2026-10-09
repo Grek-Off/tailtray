@@ -18,6 +18,24 @@ def flatten(items):
 
 
 class MenuModelTests(unittest.TestCase):
+    def test_operator_recovery_keeps_network_observation_and_useful_actions(self):
+        snapshot = Snapshot(backend_state="Running", control_error_kind="permission")
+        model = {e.key: e for e in flatten(entries(snapshot))}
+        self.assertEqual(model["status"].label, "Connected")
+        self.assertEqual(model["connection"].command, "grant-operator")
+        self.assertTrue(model["grant-control"].enabled)
+        self.assertTrue(model["refresh"].enabled)
+        self.assertFalse(model["sign-in"].enabled)
+        self.assertFalse(model["profiles"].enabled)
+
+    def test_login_error_does_not_disable_manual_sign_in(self):
+        snapshot = Snapshot(backend_state="NeedsLogin")
+        model = {e.key: e for e in flatten(entries(snapshot, action_error="Sign-in failed: network unavailable"))}
+        self.assertEqual(model["connection"].command, "login")
+        self.assertTrue(model["connection"].enabled)
+        self.assertTrue(model["sign-in"].enabled)
+        self.assertIn("network unavailable", model["health"].label)
+
     def test_tailnets_are_accessible_and_distinguish_the_same_login(self):
         profiles = (Profile("work", "me@example.com", "work.example", selected=True),
                     Profile("home", "me@example.com", "home.example"))

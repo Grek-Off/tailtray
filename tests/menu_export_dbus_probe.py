@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, SLOT, Slot
 from PySide6.QtDBus import QDBusConnection
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from tailtray.core import Device, ExitNode, Profile, Snapshot
+from tailtray.core import Device, ExitNode, Profile, Snapshot, TailscaleError
 from tailtray.status_notifier import MenuOnlyStatusNotifier, qt_status_notifier_connection_name
 from test_state_integration import StateIntegrationTests
 
@@ -192,7 +192,40 @@ def run_probe():
                 _item_id, props = find(f"{selected} — same@login")
                 assert props.get("toggle-state") == 1, "observed tailnet was not selected"
         controller.cli.begin_interactive_login.assert_not_called()
-        print("PASS: real Qt D-Bus menu, connection/tailnet cycles and dynamic exit-node notifications")
+        # An operator prompt cancelled on startup must not freeze the imported
+        # menu. Retry and subsequent sign-in travel through real D-Bus events.
+        user = controller.local_user
+        with patch.object(controller, "notify"), patch("tailtray.qt_app.save_settings"), \
+                patch.object(controller, "_open_login_url") as opened:
+            controller.refresh()
+            denied = Snapshot(backend_state="NeedsLogin", preferences={"operator": ""})
+            test.reply(denied)
+            test.finish_command(error=TailscaleError("Permission request cancelled", kind="cancelled"))
+            controller.refresh()
+            test.reply(denied)
+            grant_id, props = find("Grant this user control…")
+            assert grant_id == identity, "operator recovery replaced the connection item"
+            assert props.get("enabled", True), "operator retry is disabled"
+            call("Event", grant_id, "clicked", "<0>", "uint32 0")
+            deadline = time.monotonic() + 1
+            while not controller.executor.pending and time.monotonic() < deadline:
+                QApplication.processEvents()
+                time.sleep(.005)
+            assert controller.executor.pending, "operator retry did not dispatch"
+            test.finish_command()
+            controller.refresh()
+            test.reply(Snapshot(backend_state="NeedsLogin", preferences={"operator": user}))
+            login_id, props = find("Sign in…")
+            assert login_id == identity and props.get("enabled", True), "sign-in did not recover"
+            call("Event", login_id, "clicked", "<0>", "uint32 0")
+            deadline = time.monotonic() + 1
+            while not controller.executor.pending and time.monotonic() < deadline:
+                QApplication.processEvents()
+                time.sleep(.005)
+            assert controller.executor.pending[0][0] == controller.cli.begin_sign_in
+            test.finish_command(result="https://login.tailscale.com/a/test")
+            opened.assert_called_once_with("https://login.tailscale.com/a/test")
+        print("PASS: real Qt D-Bus menu, connection/tailnet cycles, exit nodes and operator/login recovery")
     finally:
         test.controller.tray.hide()
         test.doCleanups()

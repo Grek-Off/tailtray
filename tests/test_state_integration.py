@@ -90,6 +90,159 @@ class StateIntegrationTests(unittest.TestCase):
                 self.assertTrue(self.action("connection").isEnabled())
             self.assertEqual(notify.call_count, 2)
 
+    def finish_command(self, *, result=None, error=None):
+        command, future = self.controller.executor.pending.pop(0)
+        if error is None:
+            future.set_result(result)
+        else:
+            future.set_exception(error)
+        QApplication.processEvents()
+        return command
+
+    def test_startup_operator_repair_precedes_login_and_requires_fresh_confirmation(self):
+        self.controller.settings["automatic_login"] = True
+        self.reply(Snapshot(backend_state="NeedsLogin", preferences={"operator": ""}))
+        self.assertTrue(self.controller.operation_busy)
+        command = self.controller.executor.pending[0][0]
+        command()
+        self.controller.cli.grant_operator.assert_called_once_with(self.controller.local_user)
+        self.controller.cli.begin_sign_in.assert_not_called()
+        self.finish_command()
+        self.assertFalse(self.controller.operation_busy)
+        self.assertEqual(self.action("connection").text(), "Refresh status")
+        with patch.object(self.controller, "_open_login_url") as opened:
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="NeedsLogin", preferences={"operator": self.controller.local_user}))
+            self.assertEqual(self.controller.executor.pending[0][0], self.controller.cli.begin_sign_in)
+            self.finish_command(result="https://login.tailscale.com/a/new")
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="NeedsLogin", preferences={"operator": self.controller.local_user}))
+            opened.assert_called_once_with("https://login.tailscale.com/a/new")
+        self.assertTrue(self.action("connection").isEnabled())
+        self.assertEqual(self.action("connection").text(), "Sign in…")
+        self.assertEqual(self.controller.executor.pending, [])
+
+    def test_matching_or_unknown_operator_does_not_request_privilege(self):
+        for operator in (self.controller.local_user, None):
+            if not self.controller.refresh_running:
+                self.controller.refresh()
+            self.reply(Snapshot(backend_state="Running", preferences={"operator": operator}))
+            self.assertEqual(self.controller.executor.pending, [])
+            self.assertEqual(self.action("connection").text(), "Disconnect")
+        self.controller.cli.grant_operator.assert_not_called()
+
+    def test_cancelled_operator_prompt_keeps_recovery_and_never_repeats_on_polls(self):
+        self.controller.settings.update(automatic_login=True, automatic_reconnect=True)
+        self.controller.auth_key = "tskey-test"
+        denied = Snapshot(backend_state="NeedsLogin", preferences={"operator": "other"})
+        with patch.object(self.controller, "notify") as notify:
+            self.reply(denied)
+            self.finish_command(error=TailscaleError("Permission request cancelled", kind="cancelled"))
+            for _ in range(4):
+                self.controller.refresh()
+                self.reply(denied)
+                self.assertEqual(self.controller.executor.pending, [])
+                self.assertTrue(self.action("connection").isEnabled())
+                self.assertEqual(self.action("connection").text(), "Grant this user control…")
+                self.assertTrue(self.action("grant-control").isEnabled())
+                self.assertFalse(self.action("exit-nodes").isEnabled())
+                self.assertIn("cancelled", self.action("health").text())
+            self.action("connection").trigger()
+            self.assertTrue(self.controller.operation_busy)
+            self.assertEqual(len(self.controller.executor.pending), 1)
+            notify.assert_called_once()
+        self.controller.cli.begin_sign_in.assert_not_called()
+        self.controller.cli.login_with_auth_key.assert_not_called()
+        self.controller.cli.connect.assert_not_called()
+
+    def test_control_read_permission_error_preserves_connection_and_recovers(self):
+        snapshot = Snapshot(backend_state="Running", control_error="prefs access denied",
+                            control_error_kind="permission")
+        self.reply(snapshot)
+        self.assertTrue(self.controller.snapshot.connected)
+        self.assertTrue(self.controller.operation_busy)
+        self.assertEqual(len(self.controller.executor.pending), 1)
+
+    def test_service_or_timeout_error_does_not_trigger_operator_prompt(self):
+        for kind in ("daemon", "missing", "timeout", "protocol"):
+            if not self.controller.refresh_running:
+                self.controller.refresh()
+            self.reply(Snapshot(error_kind=kind, preferences={"operator": ""}))
+            self.assertEqual(self.controller.executor.pending, [])
+            self.assertTrue(self.action("connection").isEnabled())
+
+    def test_manual_disconnect_intent_survives_operator_repair(self):
+        self.controller.settings.update(want_connected=False, automatic_login=True, automatic_reconnect=True)
+        self.reply(Snapshot(backend_state="Stopped", preferences={"operator": ""}))
+        self.finish_command()
+        self.controller.refresh()
+        self.reply(Snapshot(backend_state="Stopped", preferences={"operator": self.controller.local_user}))
+        self.assertEqual(self.action("connection").text(), "Connect")
+        self.assertFalse(self.controller.settings["want_connected"])
+        self.assertEqual(self.controller.executor.pending, [])
+
+    def test_permission_denied_with_matching_operator_does_not_loop_automatic_repair(self):
+        self.controller.settings["automatic_login"] = True
+        snapshot = Snapshot(backend_state="NeedsLogin", preferences={"operator": self.controller.local_user})
+        with patch.object(self.controller, "notify"):
+            self.reply(snapshot)
+            self.finish_command(error=TailscaleError("login access denied", kind="permission"))
+            for _ in range(3):
+                self.controller.refresh()
+                self.reply(snapshot)
+                self.assertEqual(self.controller.executor.pending, [])
+            self.assertTrue(self.action("grant-control").isEnabled())
+            self.action("grant-control").trigger()
+            self.finish_command()
+            self.controller.refresh()
+            self.reply(snapshot)
+            self.assertEqual(self.controller.executor.pending[0][0], self.controller.cli.begin_sign_in)
+
+    def test_stale_refresh_cannot_skip_operator_repair(self):
+        self.reply(Snapshot(backend_state="Running", preferences={"operator": ""}))
+        stale_token = (1, 0)
+        stale = Future()
+        stale.set_result(Snapshot(backend_state="Running", preferences={"operator": self.controller.local_user}))
+        self.controller._finish_refresh((stale_token, stale))
+        self.assertTrue(self.controller.control_required)
+        self.assertTrue(self.controller.operation_busy)
+
+    def test_operator_checked_again_after_profile_switch_and_later_loss(self):
+        user = self.controller.local_user
+        first = Snapshot(backend_state="Running", profiles=(Profile("a", "a", selected=True), Profile("b", "b")),
+                         preferences={"operator": user})
+        self.reply(first)
+        with patch("tailtray.qt_app.save_settings"):
+            self.action("profile:b").trigger()
+            self.finish_command()
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="Running", profiles=(Profile("b", "b", selected=True),),
+                                preferences={"operator": ""}))
+            self.assertTrue(self.controller.operation_busy)
+            self.finish_command()
+            recovered = Snapshot(backend_state="Running", profiles=(Profile("b", "b", selected=True),),
+                                 preferences={"operator": user})
+            self.controller.refresh()
+            self.reply(recovered)
+            self.assertEqual(self.controller.executor.pending, [])
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="Running", profiles=recovered.profiles, preferences={"operator": ""}))
+            self.assertTrue(self.controller.operation_busy)
+
+    def test_failed_browser_login_remains_visible_and_can_be_retried_manually(self):
+        snapshot = Snapshot(backend_state="NeedsLogin", preferences={"operator": self.controller.local_user})
+        self.controller.settings["automatic_login"] = True
+        with patch.object(self.controller, "notify"), patch("tailtray.qt_app.save_settings"):
+            self.reply(snapshot)
+            self.finish_command(error=TailscaleError("coordination server unavailable", kind="command"))
+            self.controller.refresh()
+            self.reply(snapshot)
+            self.assertEqual(self.controller.executor.pending, [])
+            self.assertTrue(self.action("sign-in").isEnabled())
+            self.assertIn("coordination server unavailable", self.action("health").text())
+            self.action("sign-in").trigger()
+            self.assertEqual(self.controller.executor.pending[0][0], self.controller.cli.begin_sign_in)
+
     def test_real_cli_argv_from_menu_actions(self):
         snapshot = Snapshot(backend_state="Stopped", preferences={"exit-node": "", "accept-dns": True},
                             profiles=(Profile("p1", "first", selected=True), Profile("p2", "second")),
@@ -218,7 +371,7 @@ class StateIntegrationTests(unittest.TestCase):
         self.controller.settings["automatic_login"] = True
         self.reply(Snapshot(backend_state="NeedsLogin", profiles=(Profile("b", "b", selected=True),)))
         command, _future = self.controller.executor.pending.pop(0)
-        self.assertEqual(command, self.controller.cli.begin_interactive_login)
+        self.assertEqual(command, self.controller.cli.begin_sign_in)
         self.controller.cli.login_with_auth_key.assert_not_called()
 
     def test_failed_key_replacement_does_not_relabel_the_previous_key(self):
@@ -260,7 +413,7 @@ class StateIntegrationTests(unittest.TestCase):
             self.reply(Snapshot(backend_state="Stopped", profiles=(Profile("b", "b", selected=True),)))
         self.assertEqual(self.controller.executor.pending, [])
 
-    def test_failed_preference_change_restores_observed_checkbox_without_extra_command(self):
+    def test_permission_failure_keeps_checkbox_and_offers_control_recovery(self):
         self.reply(Snapshot(backend_state="Running", preferences={"accept-dns": True}))
         action = self.action("pref:accept-dns")
         with patch.object(self.controller, "notify"):
@@ -273,8 +426,16 @@ class StateIntegrationTests(unittest.TestCase):
             QApplication.processEvents()
             self.controller.refresh()
             self.reply(Snapshot(backend_state="Running", preferences={"accept-dns": True}))
-        self.assertTrue(action.isEnabled())
+            self.assertTrue(self.controller.operation_busy)
+            _grant, future = self.controller.executor.pending.pop(0)
+            future.set_exception(TailscaleError("permission request cancelled", kind="cancelled"))
+            QApplication.processEvents()
+            self.controller.refresh()
+            self.reply(Snapshot(backend_state="Running", preferences={"accept-dns": True}))
+        self.assertFalse(action.isEnabled())
         self.assertTrue(action.isChecked())
+        self.assertTrue(self.action("grant-control").isEnabled())
+        self.assertEqual(self.action("connection").text(), "Grant this user control…")
         self.assertEqual(self.controller.executor.pending, [])
 
     def test_real_controller_recovers_from_status_error_without_connecting(self):

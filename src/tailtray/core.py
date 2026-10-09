@@ -8,7 +8,7 @@ models.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import os
 from pathlib import Path
@@ -20,16 +20,19 @@ import time
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 
-LOGIN_URL_RE = re.compile(r"https://[^\s<>\"']+")
+# Accept the CLI's authentication prompt / standalone URL, not a documentation
+# link embedded in an error message. Custom control servers remain supported.
+LOGIN_URL_RE = re.compile(r"(?:^\s*|To authenticate[^\n:]*:\s*)(https://[^\s<>\"']+)", re.MULTILINE | re.IGNORECASE)
 
 
 class TailscaleError(RuntimeError):
     """A safe, user-displayable failure from the Tailscale CLI."""
 
-    def __init__(self, message: str, *, kind: str = "command", returncode: int = 1):
+    def __init__(self, message: str, *, kind: str = "command", returncode: int = 1, output: str = ""):
         super().__init__(message)
         self.kind = kind
         self.returncode = returncode
+        self.output = output
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +118,16 @@ class Snapshot:
     error: str = ""
     error_kind: str = ""
     self_online: Optional[bool] = None
+    control_error: str = ""
+    control_error_kind: str = ""
+
+    @property
+    def operator_user(self) -> str | None:
+        value = self.preferences.get("operator")
+        if isinstance(value, Mapping):
+            value = value.get("value")
+        # Unknown is not the same as an explicitly unset operator.
+        return value if isinstance(value, str) else None
 
     @property
     def connected(self) -> bool:
@@ -278,7 +291,11 @@ def _default_runner(argv: Sequence[str], timeout: float) -> CommandResult:
     except FileNotFoundError as exc:
         raise TailscaleError("The tailscale command is not installed", kind="missing") from exc
     except subprocess.TimeoutExpired as exc:
-        raise TailscaleError("Tailscale did not respond in time", kind="timeout") from exc
+        def decoded(value) -> str:
+            return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value or ""
+
+        raise TailscaleError("Tailscale did not respond in time", kind="timeout",
+                            output=decoded(exc.stdout) + "\n" + decoded(exc.stderr)) from exc
     return CommandResult(completed.stdout, completed.stderr, completed.returncode)
 
 
@@ -297,7 +314,8 @@ def _classify_error(text: str) -> str:
         )
     ):
         return "daemon"
-    if any(part in lowered for part in ("access denied", "permission denied", "operation not permitted", "operator")):
+    if any(part in lowered for part in ("access denied", "permission denied", "operation not permitted",
+                                       "must be root", "must be run as root", "not authorized")):
         return "permission"
     return "command"
 
@@ -506,6 +524,8 @@ class TailscaleCLI:
                 preference_cache = self._preferences_cache
             profiles: tuple[Profile, ...] = ()
             preferences: Mapping[str, Any] = {}
+            control_error = ""
+            control_error_kind = ""
             profile_cache_fresh = (
                 profile_cache
                 and now - profile_cache[0] < self._metadata_ttl
@@ -533,7 +553,7 @@ class TailscaleCLI:
                 preferences = preference_cache[1]
             else:
                 try:
-                    pref_result = self._run(["get", "--json", "all"], timeout=5, check=False)
+                    pref_result = self._run(["get", "--json", "all"], timeout=5)
                     if pref_result.returncode == 0:
                         decoded = json.loads(pref_result.stdout)
                         if isinstance(decoded, Mapping):
@@ -541,9 +561,12 @@ class TailscaleCLI:
                             with self._metadata_lock:
                                 if self._metadata_epoch == metadata_epoch:
                                     self._preferences_cache = (now, preferences, context)
-                except (TailscaleError, json.JSONDecodeError):
-                    pass
-            return parse_status(status_payload, profiles=profiles, preferences=preferences)
+                except TailscaleError as exc:
+                    control_error, control_error_kind = str(exc), exc.kind
+                except json.JSONDecodeError:
+                    control_error, control_error_kind = "Preferences returned invalid JSON", "protocol"
+            return replace(parse_status(status_payload, profiles=profiles, preferences=preferences),
+                           control_error=control_error, control_error_kind=control_error_kind)
         except TailscaleError as exc:
             return Snapshot(error=str(exc), error_kind=exc.kind)
 
@@ -554,6 +577,28 @@ class TailscaleCLI:
         try:
             self._run(["up"], timeout=25)
         finally:
+            self._invalidate_metadata()
+
+    def grant_operator(self, username: str) -> None:
+        """Acquire only local daemon control; do not change the VPN/login state."""
+        try:
+            try:
+                result = self._runner(privileged_operator_command(username), 60)
+            except TailscaleError as exc:
+                if exc.kind == "missing":
+                    raise TailscaleError("Polkit or Tailscale is unavailable; install pkexec to grant control",
+                                        kind="permission") from exc
+                raise
+            if result.returncode:
+                detail = (result.stderr or result.stdout).strip()
+                if result.returncode == 126:
+                    raise TailscaleError("Permission request cancelled. Use Grant this user control to retry.",
+                                        kind="cancelled", returncode=126)
+                raise TailscaleError(detail or "Could not grant Tailscale control", kind="permission",
+                                    returncode=result.returncode)
+        finally:
+            # A successful pkexec must be verified with fresh prefs, not the
+            # previous 30-second cache. Failures can also change daemon state.
             self._invalidate_metadata()
 
     def disconnect(self) -> None:
@@ -612,9 +657,29 @@ class TailscaleCLI:
             self._invalidate_metadata()
 
     def begin_interactive_login(self) -> str:
+        """Add a new profile. Existing NeedsLogin recovery uses bare up."""
+        return self._begin_browser_auth(["login", "--timeout=3s"])
+
+    def begin_sign_in(self) -> str:
+        # Do not create an empty profile or reset saved preferences. Even the
+        # CLI --timeout flag would require repeating all non-default up flags.
+        return self._begin_browser_auth(["up"])
+
+    def _begin_browser_auth(self, args: Sequence[str]) -> str:
         try:
-            result = self._run(["login", "--timeout=3s"], timeout=7, check=False)
+            try:
+                result = self._run(args, timeout=7, check=False)
+            except TailscaleError as exc:
+                matches = LOGIN_URL_RE.findall(exc.output) if exc.kind == "timeout" else []
+                if matches:
+                    return matches[-1].rstrip(".,;)")
+                raise
             text = f"{result.stdout}\n{result.stderr}"
+            kind = _classify_error(text)
+            if result.returncode and kind in {"permission", "missing", "daemon"}:
+                # A stale URL before a denied write is not a successful login.
+                detail = (result.stderr or result.stdout).strip()
+                raise TailscaleError(detail or "Could not start sign-in", kind=kind, returncode=result.returncode)
             matches = LOGIN_URL_RE.findall(text)
             if matches:
                 return matches[-1].rstrip(".,;)")

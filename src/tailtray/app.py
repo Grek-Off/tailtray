@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 import fcntl
-import getpass
 import os
 from pathlib import Path
 import subprocess
@@ -22,7 +21,6 @@ from .core import (
     Snapshot,
     TailscaleCLI,
     TailscaleError,
-    privileged_operator_command,
     privileged_restart_service_command,
     privileged_start_service_command,
 )
@@ -141,6 +139,7 @@ class TailTrayApp(OperationControllerMixin):
         self.snapshot = snapshot
         self._update_indicator()
         self._render_menu()
+        self._maybe_prepare_control()
         self._maybe_auto_login()
         self._maybe_auto_reconnect()
 
@@ -193,15 +192,6 @@ class TailTrayApp(OperationControllerMixin):
     def copy_address(self, address: str, device_name: str) -> None:
         Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(address, -1)
         self.notify("TailTray", f"Copied {device_name}: {address}")
-
-    def interactive_login(self, *_args) -> None:
-        if self.operation_busy:
-            return
-        self._set_connection_intent(True)
-        if self.snapshot.auth_url:
-            webbrowser.open(self.snapshot.auth_url)
-            return
-        self._action("Sign-in", self.cli.begin_interactive_login, on_success=self._open_login_url)
 
     @staticmethod
     def open_installation_guide() -> None:
@@ -303,9 +293,6 @@ class TailTrayApp(OperationControllerMixin):
                 raise TailscaleError(detail or "Could not restart tailscaled.service")
 
         self.cli.full_restart(restart_service)
-
-    def grant_operator(self, *_args) -> None:
-        self._privileged_action("Granting Tailscale control", privileged_operator_command(getpass.getuser()))
 
     def _privileged_action(self, description: str, argv: list[str]) -> None:
         def run() -> None:

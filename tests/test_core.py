@@ -361,6 +361,30 @@ class CoreTests(unittest.TestCase):
             "https://login.tailscale.com/a/abc123",
         )
 
+    def test_sign_in_error_links_and_stale_urls_are_not_success(self):
+        for text in (
+            "login access denied; see https://tailscale.com/docs/operator",
+            "To authenticate, visit:\nhttps://login.tailscale.com/a/stale\nlogin access denied",
+        ):
+            with self.subTest(text=text):
+                cli = TailscaleCLI(runner=lambda _argv, _timeout: CommandResult(stderr=text, returncode=1))
+                with self.assertRaises(TailscaleError) as raised:
+                    cli.begin_sign_in()
+                self.assertEqual(raised.exception.kind, "permission")
+
+    def test_settings_error_mentioning_operator_is_not_permission_denied(self):
+        text = "changing settings via 'tailscale up' requires mentioning all non-default flags: tailscale up --operator=alice"
+        cli = TailscaleCLI(runner=lambda _argv, _timeout: CommandResult(stderr=text, returncode=1))
+        with self.assertRaises(TailscaleError) as raised:
+            cli.begin_sign_in()
+        self.assertEqual(raised.exception.kind, "command")
+
+    def test_timeout_with_only_a_documentation_link_is_not_sign_in(self):
+        cli = TailscaleCLI(runner=lambda _argv, _timeout: CommandResult(
+            stderr="Request failed; see https://tailscale.com/docs/network", returncode=1))
+        with self.assertRaises(TailscaleError):
+            cli.begin_sign_in()
+
     def test_connect_preserves_nondefault_preferences_by_passing_no_flags(self):
         calls = []
 

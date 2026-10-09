@@ -19,9 +19,11 @@ class Entry:
 
 def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | None,
                settings: dict, secrets_available: bool, has_key: bool, autostart: bool,
-               current: bool = True) -> tuple[Entry, ...]:
+               current: bool = True, control_required: bool = False,
+               action_error: str = "") -> tuple[Entry, ...]:
     s = snapshot
-    editable = current and not busy and not s.error_kind and not s.error
+    control_required = control_required or s.error_kind == "permission" or s.control_error_kind == "permission"
+    editable = current and not busy and not s.error_kind and not s.error and not control_required
     primary = Entry("connection", "Refresh status", "refresh")
     if busy:
         stopping = operation == "Disconnecting"
@@ -33,7 +35,7 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
         primary = Entry("connection", "Open installation guide…", "installation")
     elif s.error_kind == "daemon":
         primary = Entry("connection", "Start Tailscale service…", "start-service")
-    elif s.error_kind == "permission":
+    elif control_required:
         primary = Entry("connection", "Grant this user control…", "grant-operator")
     elif editable:
         if s.backend_state == "NeedsLogin":
@@ -68,6 +70,11 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
                         checked=preference_value(s.preferences, name, default))
                   for name, label, default in options)
     auth = [Entry("admin", "Tailscale admin console…", "admin")]
+    auth.extend((
+        Entry("sign-in", "Sign in…", "login", enabled=editable and s.backend_state != "NeedsMachineAuth"),
+        Entry("grant-control", "Grant this user control…", "grant-operator",
+              enabled=current and not busy and s.error_kind not in {"missing", "daemon"}),
+    ))
     if secrets_available:
         auth.append(Entry("key", "Replace automatic sign-in key…" if has_key else "Set up automatic sign-in…",
                           "auth-key", enabled=editable and selected_profile is not None))
@@ -108,7 +115,9 @@ def build_menu(snapshot: Snapshot, *, status: str, busy: bool, operation: str | 
     return (
         Entry("status", status, enabled=False),
         Entry("self", detail or "This device", "copy", (s.ips[0], s.hostname) if s.ips else (), enabled=bool(s.ips)),
-        Entry("health", f"⚠ {s.health[0]}" if s.health else "", enabled=False),
+        Entry("health", f"⚠ {action_error}" if action_error else
+              "⚠ Grant this user control to manage Tailscale" if control_required else
+              f"⚠ {s.health[0]}" if s.health else "", enabled=False),
         Entry("sep-main", separator=True),
         primary,
         Entry("profiles", f"Tailnet: {s.tailnet or (selected_profile.tailnet if selected_profile else '') or 'select'}",

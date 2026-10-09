@@ -19,7 +19,9 @@ is required after it completes.
 | Starting | Wait for daemon progress; do not launch competing up commands. |
 | NeedsLogin | Sign-in flow only when connection is desired; no repeated browser opening from polls. |
 | NeedsMachineAuth | Device approval required; repeating login cannot approve the device. |
-| Daemon missing/unreachable or permission denied | Explicit error; no automatic privileged restart. |
+| Daemon missing/unreachable | Explicit error; no automatic privileged restart. |
+| Missing/different Unix operator or control read denied | One polkit operator repair before automatic login/up; cancellation leaves manual recovery. |
+| A write denied despite matching operator | Keep actionable error and explicit permission recovery; no automatic polkit/login loop. |
 | Status read timeout or malformed response | Status unknown, not a fabricated disconnected/connected result. |
 | Optional preferences/profile read fails | Preserve primary status; unavailable metadata must not erase connectivity. |
 | Poll started before a command changes state | Reject that observation after the operation boundary. |
@@ -37,7 +39,8 @@ changing command construction or supporting a different CLI version.
 | Exit node / boolean preference | `tailscale set --flag=value`; works while Stopped, changes only that preference. |
 | Switch saved tailnet | `tailscale switch PROFILE_ID`; refresh before selecting the new radio or enabling mutations. |
 | Add tailnet | `tailscale login --timeout=3s`; open the returned URL, never reuse the previous profile's AuthURL or auth key. |
-| Sign in when NeedsLogin | `tailscale login`; separate from enabling an authenticated node. |
+| Sign in when NeedsLogin | Bare `tailscale up` for the existing profile; preserve saved flags, extract AuthURL even at subprocess timeout. |
+| Grant local control | `pkexec tailscale set --operator=UNIX_USER`; invalidate prefs cache and re-observe before login/up. |
 | Full restart | down → privileged service restart → wait for daemon → up. |
 
 [Official CLI reference](https://tailscale.com/docs/reference/tailscale-cli).
@@ -53,6 +56,33 @@ that profile is absent, different, or unavailable. Key replacement first
 persists an unbound marker, so failure between the config and Secret Service
 writes cannot label the previous network's key as belonging to the new one.
 Profile bindings contain no secrets.
+
+### Operator and login recovery
+
+Verified with installed CLI help/read-only prefs on Tailscale 1.102.5,
+2026-10-09. Local Unix operator and the tailnet login are separate facts. The
+current process UID (not `$USER` or a tailnet account) identifies the target.
+Read-only status can succeed when writes cannot. Optional preference errors
+therefore retain primary network status and separately carry control errors.
+Absent/malformed operator metadata is unknown, not an unset operator.
+
+A first verified mismatch triggers one serialized polkit request. Automatic
+sign-in/reconnect wait for it and for fresh preference verification. Failed or
+cancelled repair does not repeat on polls in the same observed context; its
+explicit retry remains enabled. Confirmed recovery rearms checks for subsequent
+loss/profile changes. Daemon/timeouts never trigger privilege repair. A write
+denied even with the matching operator requires an explicit retry, to avoid a
+polkit → login failure loop. Errors remain visible in the menu, not just in a
+short-lived notification. Manual disconnected intent is unchanged by repair.
+
+`tailscale login` first switches to an empty profile, so it is reserved for
+Add tailnet. Existing `NeedsLogin` uses bare `up`; CLI timeout flags must not
+reset/revert saved non-default preferences. The bounded subprocess preserves
+captured AuthURL output when it times out; an output-free timeout stays an error.
+
+Sources: [Linux operator permissions](https://tailscale.com/docs/reference/troubleshooting/linux/linux-operator-permission),
+[1.102.5 login](https://github.com/tailscale/tailscale/blob/v1.102.5/cmd/tailscale/cli/login.go),
+[1.102.5 up](https://github.com/tailscale/tailscale/blob/v1.102.5/cmd/tailscale/cli/up.go).
 
 The toolkit-independent menu model derives labels, commands and enablement
 from the same observation and operation state. Qt and GTK reconcile stable
