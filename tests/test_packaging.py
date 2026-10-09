@@ -141,6 +141,7 @@ class PackagingTests(unittest.TestCase):
         for expected in (
             "BuildArch:      noarch",
             "Requires:       tailscale >= 1.56",
+            "Requires:       gobject-introspection",
             "%{_prefix}/lib/tailtray/",
             "%{_bindir}/tailtray",
             "%{_datadir}/applications/io.github.tailtray.desktop",

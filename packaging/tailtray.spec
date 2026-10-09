@@ -11,6 +11,7 @@ BuildRequires:  python3
 Requires:       tailscale >= 1.56
 Requires:       python3 >= 3.11
 Requires:       python3-gobject
+Requires:       gobject-introspection
 Requires:       python3-pyside6
 Requires:       libayatana-appindicator-gtk3
 Requires:       libsecret
