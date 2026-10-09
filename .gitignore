@@ -2,9 +2,13 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.venv/
+.runtime-venv/
 .coverage
+.coverage.*
+reports/
+public-test/
 build/
 dist/
 *.rpm
 *.tar.gz
-

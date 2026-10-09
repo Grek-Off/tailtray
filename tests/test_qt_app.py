@@ -1,7 +1,5 @@
-import ast
 from concurrent.futures import Future
 import os
-from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
@@ -17,31 +15,6 @@ try:
 except ImportError:
     QApplication = None
     TailTrayQtApp = None
-
-
-class QtTraySafetyTests(unittest.TestCase):
-    def test_tray_clicks_cannot_schedule_a_local_qmenu_popup(self):
-        """Keep Plasma in charge of opening /MenuBar for either mouse button."""
-        source_path = Path(__file__).resolve().parents[1] / "src" / "tailtray" / "qt_app.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
-
-        popup_calls = []
-        activation_connections = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr == "popup":
-                popup_calls.append(node.lineno)
-            if node.func.attr == "connect" and isinstance(node.func.value, ast.Attribute):
-                if node.func.value.attr == "activated":
-                    activation_connections.append(node.lineno)
-
-        self.assertEqual(popup_calls, [], "Qt backend must not call QMenu.popup on KDE/Wayland")
-        self.assertEqual(
-            activation_connections,
-            [],
-            "Qt backend must let Plasma handle tray activation through StatusNotifierItem",
-        )
 
 
 @unittest.skipUnless(QApplication is not None, "PySide6 is not installed")

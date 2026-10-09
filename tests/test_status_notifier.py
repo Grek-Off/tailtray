@@ -53,7 +53,7 @@ class StatusNotifierTests(unittest.TestCase):
         )
 
     def test_both_activation_slots_never_open_a_local_qmenu(self):
-        """Regression: QMenu.popup on KDE/Wayland crashed in QWindow::surfaceHandle."""
+        """The host opens /MenuBar; the adapter's activation slots are compatibility no-ops."""
         notifier = MenuOnlyStatusNotifier(Path("/tmp/tailtray-connected.png"))
 
         with patch("PySide6.QtWidgets.QMenu.popup") as popup:
@@ -63,12 +63,15 @@ class StatusNotifierTests(unittest.TestCase):
                 QApplication.processEvents()
 
         popup.assert_not_called()
+        self.assertTrue(notifier.adaptor.ItemIsMenu)
+        self.assertEqual(notifier.adaptor.Menu.path(), "/MenuBar")
 
     @unittest.skipUnless(shutil.which("dbus-run-session"), "dbus-run-session is not installed")
     def test_repeated_left_and_right_click_dbus_calls_survive_in_a_subprocess(self):
         project_dir = Path(__file__).resolve().parents[1]
         environment = os.environ.copy()
-        environment["PYTHONPATH"] = str(project_dir / "src")
+        if environment.get("TAILTRAY_TEST_INSTALLED") != "1":
+            environment["PYTHONPATH"] = str(project_dir / "src")
         environment["TAILTRAY_PROBE_DEBUG"] = "1"
         # Each process must survive both callbacks AND interpreter teardown.
         # This is a repetition regression check, never a retry of failed tests.

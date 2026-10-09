@@ -32,6 +32,16 @@ case "${1:-}:$TARGET_DISTRO" in
 esac
 python3 - <<'PY'
 import sys
+from pathlib import Path
+for relative in ('/usr/bin/tailtray', '/usr/share/applications/io.github.tailtray.desktop',
+                 '/usr/share/metainfo/io.github.tailtray.metainfo.xml'):
+    assert Path(relative).is_file(), f'Missing installed package file: {relative}'
+for source in Path('src/tailtray').glob('*.py'):
+    target = Path('/usr/lib/tailtray/tailtray') / source.name
+    assert target.is_file() and target.read_bytes() == source.read_bytes(), f'Installed module mismatch: {source.name}'
+for source in Path('data/tray-icons').glob('*.png'):
+    target = Path('/usr/share/tailtray/icons') / source.name
+    assert target.is_file() and target.read_bytes() == source.read_bytes(), f'Installed icon mismatch: {source.name}'
 sys.path.insert(0, '/usr/lib/tailtray')
 import gi
 gi.require_version('Gtk', '3.0')

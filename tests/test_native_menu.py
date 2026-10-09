@@ -15,7 +15,8 @@ class NativeMenuTests(unittest.TestCase):
         self.assertIsNotNone(shutil.which("dbus-run-session"))
         self.assertIsNotNone(shutil.which("gdbus"))
         environment = os.environ.copy()
-        environment["PYTHONPATH"] = str(project / "src")
+        if environment.get("TAILTRAY_TEST_INSTALLED") != "1":
+            environment["PYTHONPATH"] = str(project / "src")
         environment["QT_QPA_PLATFORM"] = "wayland" if environment.get("WAYLAND_DISPLAY") else "xcb"
         environment["QT_QPA_PLATFORMTHEME"] = theme
         environment["NO_AT_BRIDGE"] = "1"

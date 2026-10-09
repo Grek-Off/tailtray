@@ -532,6 +532,21 @@ class StateIntegrationTests(unittest.TestCase):
                 connection = self.action("connection")
                 self.assertEqual(self.controller.executor.pending, [])
 
+    def test_tray_activation_signals_do_not_open_local_popups_or_dispatch_commands(self):
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        self.reply(Snapshot(backend_state="Running"))
+        root = self.controller.menu
+        with patch("PySide6.QtWidgets.QMenu.popup") as popup:
+            for reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                           QSystemTrayIcon.ActivationReason.Context,
+                           QSystemTrayIcon.ActivationReason.DoubleClick):
+                self.controller.tray.activated.emit(reason)
+                QApplication.processEvents()
+        popup.assert_not_called()
+        self.assertIs(self.controller.menu, root)
+        self.assertEqual(self.controller.executor.pending, [])
+
     def test_new_exit_node_invalidates_host_cache_once_without_replacing_actions(self):
         notifier = Mock()
         self.controller.status_notifier = notifier

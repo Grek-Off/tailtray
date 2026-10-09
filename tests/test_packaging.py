@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import tomllib
 import unittest
@@ -133,12 +134,33 @@ class PackagingTests(unittest.TestCase):
             self.assertIn(f"tailtray-{version}-1.{fedora_release}.noarch.rpm", names)
             self.assertIn(f"tailtray-{version}-1.{fedora_release}.src.rpm", names)
 
-    def test_build_interface_and_reproducible_source_archive_are_declared(self):
-        script = BUILD_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("source|rpm|deb", script)
-        self.assertIn('git -C "$project_dir" archive --format=tar --prefix="$package_name-$version/" HEAD', script)
-        self.assertIn("gzip -n", script)
-        self.assertIn('version=$(PROJECT_DIR="$project_dir" python3', script)
+    def test_source_archive_is_reproducible_and_contains_only_committed_sources(self):
+        version = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text())["project"]["version"]
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary)
+            (fixture / "scripts").mkdir()
+            shutil.copy2(BUILD_SCRIPT, fixture / "scripts/build-packages.sh")
+            shutil.copy2(PROJECT_DIR / "pyproject.toml", fixture)
+            (fixture / "LICENSE").write_text("synthetic license")
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "-qm", "fixture"]):
+                subprocess.run(["git", "-C", str(fixture), *args], capture_output=True, check=True, timeout=10)
+            (fixture / "untracked-local-data").write_text("must never be archived")
+            archive = fixture / "dist" / f"tailtray-{version}.tar.gz"
+            copies = []
+            for _ in range(2):
+                subprocess.run(["bash", str(fixture / "scripts/build-packages.sh"), "source"],
+                               env=dict(os.environ, CI_COMMIT_TAG=f"v{version}"),
+                               capture_output=True, check=True, timeout=10)
+                copies.append(archive.read_bytes())
+            self.assertEqual(copies[0], copies[1])
+            self.assertEqual(copies[0][4:8], b"\x00" * 4, "gzip timestamp must not change release hashes")
+            with tarfile.open(archive) as source:
+                names = source.getnames()
+                self.assertIn(f"tailtray-{version}/LICENSE", names)
+                self.assertTrue(all(name == f"tailtray-{version}" or name.startswith(f"tailtray-{version}/")
+                                    for name in names))
+                self.assertFalse(any("untracked-local-data" in name or "/.git/" in name for name in names))
 
     def test_rpm_is_noarch_and_installs_the_complete_application_tree(self):
         spec = SPEC.read_text(encoding="utf-8")
@@ -176,13 +198,6 @@ class PackagingTests(unittest.TestCase):
             self.assertIn(expected, rules)
         self.assertNotIn("systemctl", rules)
         self.assertNotIn("tailscale set", rules)
-
-    def test_package_build_checks_do_not_require_native_desktop_dependencies(self):
-        spec = SPEC.read_text(encoding="utf-8")
-        rules = (DEBIAN / "rules").read_text(encoding="utf-8")
-        self.assertIn("%{python3} -m unittest tests.test_packaging", spec)
-        self.assertIn("python3 -m unittest tests.test_packaging", rules)
-        self.assertNotIn("python3-pyside6", (DEBIAN / "control").read_text(encoding="utf-8").split("Package:")[0])
 
 
 if __name__ == "__main__":

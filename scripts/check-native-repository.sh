@@ -2,7 +2,7 @@
 # Consume the actual signed indices with native tools in a disposable image.
 set -euo pipefail
 : "${TARGET_DISTRO:?Missing repository test target}"
-repo_root=$(realpath public)
+repo_root=$(realpath "${TAILTRAY_REPOSITORY_DIR:-public}")
 work_dir=$(mktemp -d)
 trap 'rm -rf -- "$work_dir"' EXIT
 case "$TARGET_DISTRO" in

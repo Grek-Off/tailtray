@@ -1,9 +1,11 @@
-.PHONY: test check run install
+.PHONY: test check static-check run install
 
 test:
 	PYTHONPATH=src python3 -m unittest discover -s tests -v
 
-check: test
+check: test static-check
+
+static-check:
 	python3 -m compileall -q src tests scripts
 	bash -n scripts/*.sh
 	@for icon in data/icons/hicolor/scalable/status/*.svg; do xmllint --noout "$$icon"; done
