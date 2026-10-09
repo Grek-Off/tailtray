@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import tarfile
@@ -35,6 +36,7 @@ class PackagingTests(unittest.TestCase):
 
     def test_all_package_versions_match_project(self):
         version = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text())["project"]["version"]
+        self.assertEqual(runpy.run_path(str(PROJECT_DIR / "src/tailtray/__init__.py"))["__version__"], version)
         rpm_version = re.search(r"^Version:\s+(\S+)", SPEC.read_text(), re.MULTILINE).group(1)
         self.assertEqual(rpm_version, version)
         self.assertTrue((DEBIAN / "changelog").read_text().startswith(f"tailtray ({version}-"))

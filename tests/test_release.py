@@ -1,6 +1,7 @@
 """Exercise publishing with in-memory GitLab; no credentials/network."""
 import hashlib
 import importlib.util
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,8 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
-from urllib.request import Request
+from urllib.request import HTTPSHandler, Request, build_opener
+from urllib.response import addinfourl
 
 _spec = importlib.util.spec_from_file_location(
     "gitlab_release", Path(__file__).resolve().parents[1] / "scripts/gitlab_release.py")
@@ -219,6 +221,34 @@ class ReleaseTests(unittest.TestCase):
                 ValueError, r"GitLab GET request failed \(HTTP 400\).*a\.txt") as raised:
             client.request("GET", "/packages/generic/tailtray/v0.1.0/a.txt")
         self.assertNotIn("synthetic-not-a-secret", str(raised.exception))
+
+    def test_real_urllib_preprocessing_keeps_binary_uploads_out_of_form_parser(self):
+        requests = []
+
+        class CaptureHTTPS(HTTPSHandler):
+            def https_open(self, request):
+                # The real opener's https_request preprocessing still runs;
+                # only the socket transport is replaced with a small response.
+                requests.append(request)
+                response = addinfourl(BytesIO(b"{}"), {}, request.full_url, 200)
+                response.msg = "OK"
+                return response
+
+        client = release.GitLab("https://gitlab.invalid/api/v4", "123", "synthetic-not-a-secret")
+        client.opener = build_opener(release.SafeRedirects(), CaptureHTTPS())
+        binary = b"!<arch>\n\x00\xff\x80%invalid&file[]=binary"
+        for method, data, payload, content_type in (
+            ("PUT", binary, None, "application/octet-stream"),
+            ("POST", None, {"name": "release"}, "application/json"),
+            ("GET", None, None, None),
+        ):
+            with self.subTest(method=method):
+                self.assertEqual(client.request(method, "/fixture", data=data, json_data=payload), b"{}")
+                request = requests[-1]
+                self.assertEqual(request.get_method(), method)
+                self.assertEqual(request.get_header("Content-type"), content_type)
+                self.assertEqual(request.data, json.dumps(payload).encode() if payload is not None else data)
+                self.assertEqual(request.get_header("Job-token"), "synthetic-not-a-secret")
 
     def test_missing_only_swallows_404_not_forbidden_or_bad_request(self):
         client = release.GitLab("https://gitlab.invalid/api/v4", "123", "synthetic-not-a-secret")

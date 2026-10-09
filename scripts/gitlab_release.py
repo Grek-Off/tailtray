@@ -75,6 +75,10 @@ class GitLab:
         if json_data is not None:
             data = json.dumps(json_data).encode()
             headers["Content-Type"] = "application/json"
+        elif data is not None:
+            # urllib otherwise labels arbitrary bytes as an HTML form. Package
+            # uploads must reach Workhorse as a raw file, not form parameters.
+            headers["Content-Type"] = "application/octet-stream"
         try:
             with self.opener.open(Request(self.base + path, data=data, headers=headers, method=method),
                                   timeout=90) as response:

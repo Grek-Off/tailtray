@@ -42,11 +42,21 @@ Do not operate the live VPN or rotate/read the release signing secret.
   and both Fedora runtime jobs PASS. Debian/Ubuntu smoke failed on PNG byte
   equality after dh_strip_nondeterminism; compare decoded RGBA pixels and size
   instead. Keep the visual integrity assertion, not the encoding assumption.
+- Commita274d1f pipeline2930304597 fully PASS:11 jobs,689 JUnit checks,0 skips.
+  Protected tagv0.1.2 points exactly there. Tag pipeline2930383974 passed all
+  tests/builds/rehearsals; actual release failed HTTP500 on first binary upload.
+  Retried publication job17059264717 failed identically; no GitLab Release.
+- Real urllib preprocessing regression reproduces binary PUT being silently
+  labeled application/x-www-form-urlencoded. Fix explicit octet-stream; JSON
+  remains JSON and GET has no body content type. No real HTTP/socket/credential
+  in this regression. Need actual corrected publication proof, not a mock PASS.
+- Preserve tagv0.1.2; next releasev0.1.3. Sync package/AppStream/public Python
+  versions and assert the public version too (it was stale0.1.0).
 
 ## Next
 
 Finish useful test reductions/runtime checks, bounded test runner/JUnit reports,
 secretless signed-repo rehearsal and CI gates. Verify exact pushed SHA green;
-only then protected v0.1.2 release (previous mainc748b1e was green).
+only then protected v0.1.3 release. Do not rewrite existing v0.1.2 tag.
 Public Pages remains off. Installed UI module update was completed last turn;
 live menu verification was interrupted and must not be claimed as confirmed.
