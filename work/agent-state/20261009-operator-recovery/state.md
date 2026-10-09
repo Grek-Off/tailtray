@@ -44,7 +44,13 @@ Base revision: `6405682`; working diff is authoritative until publication.
   Subagent is finished and closed; no further writers remain.
 - Login errors cannot become success by containing a documentation/stale URL;
   non-default setting errors mentioning --operator are not permission failures.
-- Before final publication, commit and push; verify refs.
+- Implementation commit: `d1f30a4`. Initial push was rejected (fetch first):
+  remote main contained CI changes through `476e80a`. Fetched and inspected;
+  merged normally without conflict or history rewriting. These changes restore
+  shared build runners and adapt native probes for KDE exporter ID renumbering.
+  Operator/login D-Bus probes also resolve current IDs across membership changes;
+  local QAction identity is checked separately by controller regressions.
+- Before final publication, reverify merged tests and push; verify refs.
   Do not treat this pre-publication checkpoint as proof of those later actions.
 
 ## Sources
