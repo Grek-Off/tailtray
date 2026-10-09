@@ -155,15 +155,15 @@ def run_probe():
             while time.monotonic() < deadline:
                 QApplication.processEvents()
                 time.sleep(.005)
-            assert exit_id in signals.parents or 0 in signals.parents, (
-                f"host was not notified about changed submenu {exit_id}: {signals.parents}"
-            )
             # Model Plasma's initial empty-submenu fetch: it leaves this ID in
             # m_idsRefreshedByAboutToShow, consuming the next LayoutUpdated.
             # With KDE's single batched signal the host stays stale indefinitely
             # unless NewMenu invalidates its importer. Generic Qt emits more
             # than one signal and used to conceal this regression in our tests.
             assert signals.menu_changes == 1, "new menu membership did not invalidate the KDE cache"
+            # NewMenu invalidates the importer, including exporter-assigned IDs.
+            # KDE may renumber a submenu when an earlier submenu becomes enabled.
+            exit_id, _ = find("Exit node: unknown")
             layout = call("GetLayout", exit_id, 1, "[]")[1]
             labels = [child[1].get("label") for child in layout[2]]
             assert labels == ["None", "Automatic (best available)", *(n.label for n in nodes)], labels
