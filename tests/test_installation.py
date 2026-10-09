@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -27,6 +28,26 @@ def run_helper(function: str, *arguments: str) -> subprocess.CompletedProcess[st
 
 
 class InstallationTests(unittest.TestCase):
+    def test_repository_key_pin_rejects_extra_primary_keys_and_missing_fingerprint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tool = root / "gpg"
+            tool.write_text('#!/usr/bin/bash\nprintf "%s\\n" "$TAILTRAY_TEST_KEY_LISTING"\n')
+            tool.chmod(0o755)
+            primary = "pub::::::::::\nfpr:::::::::" + "A" * 40 + ":\n"
+            for listing, valid in (
+                (primary, True),
+                (primary + "sub::::::::::\nfpr:::::::::" + "B" * 40 + ":\n", True),
+                (primary + "pub::::::::::\nfpr:::::::::" + "B" * 40 + ":\n", False),
+                (primary.replace("A" * 40, "B" * 40), False),
+                ("pub::::::::::\n", False),
+            ):
+                with self.subTest(listing=listing), patch.dict(os.environ, {
+                    "PATH": str(root) + os.pathsep + os.environ["PATH"], "TAILTRAY_TEST_KEY_LISTING": listing,
+                }):
+                    result = run_helper("tailtray_verify_repository_key", str(root / "key.asc"), "A" * 40)
+                    self.assertEqual(result.returncode == 0, valid, result.stderr)
+
     def test_native_repository_checker_refuses_host_mutations_and_credential_urls(self):
         script = PROJECT_DIR / "scripts/check-native-repository.sh"
         for ci, url, message in (

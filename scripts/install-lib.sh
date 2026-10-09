@@ -4,6 +4,18 @@
 # detection and tree verification here makes the update path testable without
 # sudo or a running desktop session.
 
+tailtray_verify_repository_key() {
+    local key_file="$1" expected="$2" listing primary_count actual
+    listing=$(gpg --batch --show-keys --with-colons "$key_file" 2>/dev/null) || return 1
+    primary_count=$(awk -F: '$1 == "pub" {n++} END {print n+0}' <<< "$listing")
+    actual=$(awk -F: '$1 == "fpr" {print $10; exit}' <<< "$listing")
+    # Do not trust extra primary keys bundled after the pinned one. Native
+    # apt/dnf will trust every imported primary key in this file.
+    [[ $primary_count == 1 && $actual == "$expected" ]] || {
+        echo "Repository key must contain only the pinned primary key" >&2; return 1;
+    }
+}
+
 tailtray_process_matches() {
     local executable="${1:-}"
     local launcher="${2:-}"

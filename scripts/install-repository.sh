@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Add only the signed TailTray repository; do not touch the Tailscale daemon.
 set -euo pipefail
+# shellcheck source=install-lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/install-lib.sh"
 if [[ $# != 1 || $1 != https://* || $1 == *[\?\#]* ]]; then
     echo "Usage: bash scripts/install-repository.sh https://YOUR-PAGES-REPOSITORY" >&2
     exit 2
@@ -19,10 +21,9 @@ work_dir=$(mktemp -d)
 trap 'rm -rf -- "$work_dir"' EXIT
 export GNUPGHOME="$work_dir/gnupg"
 mkdir -m 0700 "$GNUPGHOME"
-curl --fail --silent --show-error --location "$repository/repository-key.asc" --output "$work_dir/key.asc"
-actual=$(gpg --batch --show-keys --with-colons "$work_dir/key.asc" 2>/dev/null \
-    | awk -F: '$1 == "fpr" {print $10; exit}')
-[[ $actual == "$fingerprint" ]] || { echo "Unexpected repository signing key" >&2; exit 1; }
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+    "$repository/repository-key.asc" --output "$work_dir/key.asc"
+tailtray_verify_repository_key "$work_dir/key.asc" "$fingerprint"
 if [[ $mode == rpm ]]; then
     config=/etc/yum.repos.d/tailtray.repo
     printf '[tailtray]\nname=TailTray\nbaseurl=%s/rpm/fedora/$releasever/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/repository-key.asc\n' \

@@ -87,8 +87,18 @@ Do not operate the live VPN or rotate/read the release signing secret.
   Authenticated GitLab CI lint valid, no errors/warnings. Public settings and
   two publishing variables not yet changed (both specific variables absent).
 
-Next: commit/push, verify exact branch pipeline; enable only public Pages and
-two protected nonsecret variables, issue new immutablev0.1.4 tag, verify actual
-release + Pages + anonymous native consumers and downloaded source integrity.
+- Commit6411868 pushed, exact branch pipeline2930851881 currently building.
+- Authorized Pages setting changed onlypages_access_level=public. ProjectGit
+  visibility remainsprivate, Registry accessunchanged, Pagesforce_https=true.
+  Created protected/raw/env_var TAILTRAY_PUBLISH_REPOSITORY=1 and
+  TAILTRAY_REPOSITORY_URL=https://tailtray-657378.gitlab.io; no secret key reads.
+- Read-only Epicurus01a120f6-4d4a-7032-ac65-d27992cb185e completed/closed:
+  pinning first fingerprint alone allowed bundled extra primary keys; readiness
+  budget too short for Pages. Shared helper now rejects extra primary keys,
+  consumer checks actual VALIDSIG signer, installer requires HTTPS redirects,
+  retry budget24 with outer240-second timeout. Added safe fake-GPG regression.
+
+Next: verify corrected exact branch pipeline, issue new immutablev0.1.4 tag,
+verify actual release + Pages + anonymous native consumers and source integrity.
 Installed UI module update was completed last turn;
 live menu verification was interrupted and must not be claimed as confirmed.

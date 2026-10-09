@@ -2,6 +2,8 @@
 # Consume the actual signed indices with native tools in a disposable image.
 set -euo pipefail
 [[ ${CI:-} == true ]] || { echo "Native repository checks require disposable CI images" >&2; exit 2; }
+# shellcheck source=install-lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/install-lib.sh"
 : "${TARGET_DISTRO:?Missing repository test target}"
 case "$TARGET_DISTRO" in
     fedora43|fedora44|debian13|ubuntu26.04) ;;
@@ -31,14 +33,13 @@ if [[ -n $repository_url ]]; then
     # pages:deploy and edge caches can lag the producing job. Retry only
     # readiness, bounded by the CI timeout; never use stale apt/dnf metadata.
     ready=false
-    for attempt in {1..12}; do
+    for attempt in {1..24}; do
         if fetch repository-key.asc && fetch manifest.json && fetch manifest.json.asc; then
-            actual=$(gpg --batch --show-keys --with-colons "$work_dir/repository-key.asc" 2>/dev/null \
-                | awk -F: '$1 == "fpr" {print $10; exit}')
-            [[ $actual == D432326D1167240864F8345763FA04F99681DA62 ]] || { echo "Unexpected public signing key" >&2; exit 1; }
+            tailtray_verify_repository_key "$work_dir/repository-key.asc" D432326D1167240864F8345763FA04F99681DA62
             gpg --batch --import "$work_dir/repository-key.asc"
-            gpg --batch --verify "$work_dir/manifest.json.asc" "$work_dir/manifest.json"
-            if python3 -c 'import json,sys; sys.exit(sys.argv[2][1:] not in json.load(open(sys.argv[1]))["versions"])' \
+            if gpg --batch --status-fd 1 --verify "$work_dir/manifest.json.asc" "$work_dir/manifest.json" > "$work_dir/signature-status" \
+                && grep -Fq '[GNUPG:] VALIDSIG D432326D1167240864F8345763FA04F99681DA62 ' "$work_dir/signature-status" \
+                && python3 -c 'import json,sys; sys.exit(sys.argv[2][1:] not in json.load(open(sys.argv[1]))["versions"])' \
                 "$work_dir/manifest.json" "$CI_COMMIT_TAG"; then ready=true; break; fi
         fi
         sleep 5
