@@ -54,6 +54,10 @@ class StateIntegrationTests(unittest.TestCase):
             self.addCleanup(item.stop)
         self.controller = TailTrayQtApp()
         self.controller.refresh_timer.stop()
+        # Every observation is delivered explicitly by this fixture. Queued
+        # real singleShot polls from past operations can run in another test
+        # on slower CI and mutate a menu unrelated to the current assertion.
+        self.controller._schedule_refresh_after_action = Mock()
         self.addCleanup(self.controller._operation_shutdown)
 
     def reply(self, snapshot):
