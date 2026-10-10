@@ -469,13 +469,31 @@ def verify_release_assets(client: GitHub, release: dict, paths: list[Path]) -> N
             raise ValueError(f"Published asset missing or differs: {path.name}")
 
 
+def release_body(tag: str, commit: str) -> str:
+    if not VERSION.fullmatch(tag) or not SHA.fullmatch(commit):
+        raise ValueError("Release notes require a stable tag and full source commit")
+    base = "https://github.com/Grek-Off/tailtray"
+    return ("Unofficial native Linux controller for the official Tailscale daemon.\n\n"
+            "- Fedora 43/44: signed noarch RPM and source RPM.\n"
+            "- Debian 13 / Ubuntu 26.04: all-architecture DEB.\n"
+            "- Reproducible source `.tar.gz`, signed checksums and repository history.\n\n"
+            f"[Changes]({base}/blob/{tag}/CHANGELOG.md) · "
+            f"[Installation, updates and signature verification]({base}/blob/{tag}/docs/releases.md)\n\n"
+            "[Signed APT/DNF repository](https://grek-off.github.io/tailtray). "
+            "No GitHub token is needed. Existing GitLab installations remain opt-in.\n\n"
+            "Signing fingerprint: `D432326D1167240864F8345763FA04F99681DA62`.\n\n"
+            f"Source commit: [{commit}]({base}/commit/{commit}). "
+            "Native installation/runtime and anonymous package-manager checks run on x86_64; "
+            "arm64 end-to-end coverage is not claimed. Tailscale itself is not bundled.\n")
+
+
 def publish(client: GitHub, directory: Path, tag: str, commit: str) -> None:
     paths = validate_release_inputs(client, directory, tag, commit)
     release = client.release(tag)
     if not release:
         try:
             release = client.json("POST", "/releases", {"tag_name": tag, "target_commitish": commit,
-                "name": "TailTray " + tag, "body": f"Signed TailTray packages for commit `{commit}`.",
+                "name": "TailTray " + tag, "body": release_body(tag, commit),
                 "draft": True, "prerelease": False, "generate_release_notes": False})
         except ValueError:
             release = client.release(tag)

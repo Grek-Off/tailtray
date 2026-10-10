@@ -6,6 +6,12 @@
 публикуется. Статус — [Release workflow](https://github.com/Grek-Off/tailtray/actions/workflows/release.yml),
 готовые файлы — [Releases](https://github.com/Grek-Off/tailtray/releases).
 
+Проверенный выпуск: [v0.1.6](https://github.com/Grek-Off/tailtray/releases/tag/v0.1.6),
+коммит `3e310bb02a851a5f769672ea4e0571e48f8ba6d9`,
+[production pipeline](https://github.com/Grek-Off/tailtray/actions/runs/38045667801):
+23 jobs SUCCESS. Отдельная проверка без токена подтвердила 11 immutable assets,
+21 подписанный payload истории v0.1.4/v0.1.5/v0.1.6 и точное совпадение source archive.
+
 | Система | Пакеты | Проверка |
 | --- | --- | --- |
 | Fedora 43 | `.fc43.noarch.rpm`, `.fc43.src.rpm` | native build, установленный Qt/GTK runtime, DNF |

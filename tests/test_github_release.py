@@ -81,6 +81,16 @@ class MemoryGitHub:
 
 
 class GitHubReleaseTests(unittest.TestCase):
+    def test_release_notes_pin_docs_and_source_and_state_actual_distribution_support(self):
+        body = release.release_body("v0.1.6", "a" * 40)
+        self.assertIn("blob/v0.1.6/CHANGELOG.md", body)
+        self.assertIn("/commit/" + "a" * 40, body)
+        self.assertIn("Fedora 43/44", body)
+        self.assertIn("Ubuntu 26.04", body)
+        self.assertIn("arm64 end-to-end coverage is not claimed", body)
+        with self.assertRaises(ValueError):
+            release.release_body("main", "a" * 40)
+
     def test_by_tag_404_falls_back_to_authenticated_draft_listing(self):
         client = release.GitHub("Grek-Off/tailtray", "synthetic")
         draft = {"tag_name": "v0.1.0", "draft": True, "id": 1}

@@ -144,3 +144,32 @@ claim GitHub migration or CI completed before actual scoped access and proof.
 - Next commit metadata/docs/protection tooling, new annotated tagv0.1.6, run
   Release production pipeline. Do not claim new Pages verified before all4live
   consumers and finalization succeed. Agents closed; no background writers.
+
+## Production run dispatched
+
+-3e310bb committed/pushed normally and annotated v0.1.6 created/pushed without
+  moving any existing tag. Main CI38045667426 and Release38045667801 running.
+- protect-main applied after real successful all-jobs gate. PR status context
+  CI required from github-actions, strict/up-to-date; required reviewer count0
+  for solo maintainer. Admin normal-update exception intentional. Separate
+  active no-bypass ruleset forbids main deletion/non-fast-forward history rewrite.
+- Pending: actual signing/draft, four signed repository checks, Pages deployment,
+  four anonymous HTTP consumers and final11asset immutable release. No production
+  PASS claimed yet. New docs version at release tag describes architecture;
+  docs/github-migration pending verification paragraph must be updated afterproof.
+
+## Production verification COMPLETE
+
+- Release38045667801 SUCCESS, ALL23jobsSUCCESS. Main CI38045667426 SUCCESS.
+  Exact source3e310bb02a851a5f769672ea4e0571e48f8ba6d9; immutable Release ID408879752
+  https://github.com/Grek-Off/tailtray/releases/tag/v0.1.6, draftfalse/immutabletrue.
+- Real existing signing key,4actual signed native repository consumers, Pages,
+ 4anonymous native HTTPS consumers and finalize allSUCCESS. 11releaseassets.
+- Independent credential-free verify-github-release.py PASS: downloaded every
+  GitHub asset plus all21signed Pages payloads, verified pinned key/GPG signatures,
+  exact gitarchive source, remote/localtagidentity, restored v0.1.6 history.
+  Versions0.1.4/0.1.5/0.1.6 preserved. No VPN/host package changes.
+- Added portable read-only verifier and3tests; separate installed runtime tooling
+  ignore added. Parent final docs/proof/release-notes changes pendingcommit+CI.
+- Next: publish final documentation/tooling commit, confirm latest main CI,
+  preserve oldGitLab endpoint availability, final concise links/reminderPATscope.

@@ -5,8 +5,12 @@ The public repository exists with preserved `main` history and v0.1.0–v0.1.5
 tags. The proven v0.1.5 release was transferred byte-for-byte: ten original
 assets plus a signed history archive covering fourteen immutable v0.1.4/v0.1.5
 payloads. Restoring that archive and a non-mutating repeat publication were
-verified. GitHub v0.1.6 CI/public APT-DNF verification is the remaining gate;
-do not confuse prepared workflow YAML with a successful live release.
+verified. GitHub [v0.1.6](https://github.com/Grek-Off/tailtray/releases/tag/v0.1.6)
+and [production pipeline](https://github.com/Grek-Off/tailtray/actions/runs/38045667801)
+are now successful: all23jobs, four native builds/installed runtimes, protected
+signing, four signed repository checks, Pages, four anonymous native HTTPS
+consumers and finalization. Separate token-free verification confirmed11immutable
+assets,21signed historical payloads, signatures and exact tagged source archive.
 
 ## One-time bootstrap token
 
@@ -84,8 +88,20 @@ from every process running as the same desktop user.
    consumers are proven. Do not silently redirect installed clients or delete
    old releases. A workflow file or local PASS is not proof of a live release.
 
-The current working release is GitLab `v0.1.5`; installation and pinned signing
-key verification remain documented in [releases.md](releases.md).
+The current GitHub release is `v0.1.6`, source commit
+`3e310bb02a851a5f769672ea4e0571e48f8ba6d9`. Signed updates are available anonymously
+at `https://grek-off.github.io/tailtray`. GitLab `v0.1.5` remains available for
+existing clients. Installation and opt-in switching are in [releases.md](releases.md).
+
+Read-only verification from a clone with the release tag:
+
+```fish
+python3 scripts/verify-github-release.py --tag v0.1.6
+```
+
+It uses no credentials, checks every asset and Pages payload, verifies GPG and
+the local/remote source commit and restores signed release history in a temporary
+directory. It does not install packages, change repository configs or touch VPN.
 
 ## Production workflow
 
