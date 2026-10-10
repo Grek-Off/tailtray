@@ -5,18 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tailtray"
 version = "0.1.5"
-description = "An unofficial, native Tailscale tray client for Fedora Linux"
+description = "An unofficial, native Tailscale tray client for Linux desktops"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{name = "TailTray contributors"}]
+authors = [{name = "Vladimir Grekov"}, {name = "TailTray contributors"}]
 classifiers = [
   "Environment :: X11 Applications :: GTK",
   "Environment :: X11 Applications :: Qt",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Grek-Off/tailtray"
+Issues = "https://github.com/Grek-Off/tailtray/issues"
+Source = "https://github.com/Grek-Off/tailtray"
 
 [project.optional-dependencies]
 kde = [
@@ -27,6 +32,7 @@ dev = [
   "pytest>=8,<10",
   "pytest-cov>=7,<8",
   "pytest-timeout>=2.4,<3",
+  "PyYAML>=6,<7",
   "ruff>=0.11,<1",
 ]
 

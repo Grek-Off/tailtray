@@ -1,5 +1,24 @@
 # TailTray
 
+An independent, unofficial Linux tray controller for the official Tailscale
+daemon. Native KDE Plasma menus, a GTK/AppIndicator fallback, saved tailnet
+switching, exit-node selection, device/IP lists and connection recovery —
+without reimplementing the VPN or replacing `tailscaled`.
+
+RPM packages target Fedora 43/44; DEB packages target Debian 13 and Ubuntu
+26.04. See [signed packages and updates](docs/releases.md) for the currently
+verified distribution channel. GitHub migration is in preparation; its
+[access and publication checklist](docs/github-migration.md) records the gates.
+
+Maintained by [Владимир Греков / Vladimir Grekov](https://github.com/Grek-Off),
+with AI-assisted development by Codex/OpenAI. See [credits](CONTRIBUTORS.md),
+[contribution guide](CONTRIBUTING.md), [code of conduct](CODE_OF_CONDUCT.md) and
+the [MIT license](LICENSE). TailTray is not an official Tailscale product and
+is not endorsed by Tailscale or OpenAI. Its independently drawn dot-grid icon
+does not change that affiliation.
+
+## Документация на русском
+
 Неофициальный нативный tray-клиент для официального Tailscale daemon на
 Linux. Первая целевая платформа — Fedora с GNOME или KDE.
 
@@ -218,7 +237,9 @@ Package Registry: ссылки не зависят от срока хранен�
 только публичный ключ. Приватность файлов наследуется от GitLab-проекта.
 
 Подписанные репозитории для обновлений через `dnf` / `apt` также собираются CI.
-Их публикация через Pages выключена до явного разрешения публичного доступа.
+С разрешения владельца они опубликованы через GitLab Pages; проверенный релиз
+`v0.1.5` доступен без GitLab-аккаунта. При переносе на GitHub этот адрес
+сохраняется до проверки нового канала обновлений.
 Установка, подписи, история версий и выпуск следующего релиза:
 [docs/releases.md](docs/releases.md).
 
