@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['v*.*.*']
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -18,6 +18,11 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
   PYTHONFAULTHANDLER: '1'
   QT_QPA_PLATFORM: offscreen
+  # Checkout runs Node as the runner user but build steps run as container root.
+  # Trust only this mounted checkout, not every repository in the image.
+  GIT_CONFIG_COUNT: '1'
+  GIT_CONFIG_KEY_0: safe.directory
+  GIT_CONFIG_VALUE_0: ${{ github.workspace }}
   CI_COMMIT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
 
 defaults:
@@ -59,6 +64,19 @@ jobs:
             reports/
           if-no-files-found: ignore
           retention-days: 7
+
+  ci-required:
+    name: CI required
+    needs: [verify, source, rpm, deb, release-rehearsal, repository-rehearsal]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every verification job
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          [[ $RESULTS == success,success,success,success,success,success ]]
 
   source:
     runs-on: ubuntu-24.04

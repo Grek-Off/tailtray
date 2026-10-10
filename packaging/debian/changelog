@@ -1,3 +1,10 @@
+tailtray (0.1.6-1) unstable; urgency=low
+
+  * Publish source, native packages and signed update repositories on GitHub.
+  * Add protected releases, public contribution and security guidance.
+
+ -- Vladimir Grekov <grekov.vs@gmail.com>  Sat, 10 Oct 2026 00:00:00 +0000
+
 tailtray (0.1.5-1) unstable; urgency=low
 
   * Use immutable release links without invalid DEB download aliases.

@@ -24,7 +24,7 @@ class GitHubCITests(unittest.TestCase):
         return [step for job in self.jobs.values() for step in job["steps"]]
 
     def test_untrusted_changes_cannot_publish_or_use_release_secrets(self):
-        self.assertEqual(set(self.workflow["on"]), {"push", "pull_request"})
+        self.assertEqual(set(self.workflow["on"]), {"push", "pull_request", "workflow_call"})
         self.assertEqual(self.workflow["on"]["push"]["branches"], ["main"])
         self.assertEqual(self.workflow["permissions"], {"contents": "read"})
         for forbidden in ("pull_request_target", "secrets.", "publish-release.sh", "release-ci.sh"):
@@ -47,7 +47,11 @@ class GitHubCITests(unittest.TestCase):
                 self.assertEqual(step["with"]["persist-credentials"], "false")
 
     def test_git_is_installed_before_checkout_in_every_minimal_container(self):
+        self.assertEqual(self.workflow["env"]["GIT_CONFIG_KEY_0"], "safe.directory")
+        self.assertEqual(self.workflow["env"]["GIT_CONFIG_VALUE_0"], "${{ github.workspace }}")
         for name, job in self.jobs.items():
+            if "container" not in job:
+                continue
             with self.subTest(job=name):
                 steps = job["steps"]
                 checkout = next(index for index, step in enumerate(steps)
@@ -60,6 +64,8 @@ class GitHubCITests(unittest.TestCase):
         self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "true")
         for job in self.jobs.values():
             self.assertLessEqual(int(job["timeout-minutes"]), 30)
+            if "container" not in job:
+                continue
             self.assertRegex(job["container"]["options"], r"--memory=[234]g")
             uploads = [step for step in job["steps"]
                        if step.get("uses", "").startswith("actions/upload-artifact@")]
@@ -109,3 +115,15 @@ class GitHubCITests(unittest.TestCase):
             self.assertIn(command, self.text)
             self.assertTrue((ROOT / command.split()[0]).is_file())
         self.assertIn("SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)", self.text)
+
+    def test_required_gate_fails_on_skipped_or_failed_dependency(self):
+        gate = self.jobs["ci-required"]
+        self.assertEqual(set(gate["needs"]), set(self.jobs) - {"ci-required"})
+        self.assertEqual(gate["if"], "always()")
+        script = gate["steps"][0]["run"]
+        for results, expected in [("success," * 5 + "success", 0),
+                                  ("success," * 5 + "failure", 1),
+                                  ("success," * 5 + "skipped", 1)]:
+            import os
+            result = subprocess.run(["bash", "-e", "-c", script], env=dict(os.environ, RESULTS=results))
+            self.assertEqual(result.returncode, expected)

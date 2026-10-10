@@ -1,5 +1,8 @@
 # TailTray
 
+[![CI](https://github.com/Grek-Off/tailtray/actions/workflows/ci.yml/badge.svg)](https://github.com/Grek-Off/tailtray/actions/workflows/ci.yml)
+[Releases](https://github.com/Grek-Off/tailtray/releases) · [Changelog](CHANGELOG.md)
+
 An independent, unofficial Linux tray controller for the official Tailscale
 daemon. Native KDE Plasma menus, a GTK/AppIndicator fallback, saved tailnet
 switching, exit-node selection, device/IP lists and connection recovery —
@@ -7,12 +10,14 @@ without reimplementing the VPN or replacing `tailscaled`.
 
 RPM packages target Fedora 43/44; DEB packages target Debian 13 and Ubuntu
 26.04. See [signed packages and updates](docs/releases.md) for the currently
-verified distribution channel. GitHub migration is in preparation; its
-[access and publication checklist](docs/github-migration.md) records the gates.
+verified distribution channel. The public source and preserved tags are on
+[GitHub](https://github.com/Grek-Off/tailtray); the
+[migration checklist](docs/github-migration.md) records release verification.
 
 Maintained by [Владимир Греков / Vladimir Grekov](https://github.com/Grek-Off),
 with AI-assisted development by Codex/OpenAI. See [credits](CONTRIBUTORS.md),
-[contribution guide](CONTRIBUTING.md), [code of conduct](CODE_OF_CONDUCT.md) and
+[contribution guide](CONTRIBUTING.md), [security policy](SECURITY.md),
+[code of conduct](CODE_OF_CONDUCT.md) and
 the [MIT license](LICENSE). TailTray is not an official Tailscale product and
 is not endorsed by Tailscale or OpenAI. Its independently drawn dot-grid icon
 does not change that affiliation.

@@ -6,9 +6,9 @@ User explicitly authorizes public GitHub TailTray with history/tags, complete
 project presentation/contribution docs/license and CI/release migration. Human
 maintainer: Владимир Греков (Vladimir Grekov), GitHub Grek-Off, public contact
 grekov.vs@gmail.com. Target inferred from existing project name: Grek-Off/tailtray.
-User wants agent to create the repository, not a manual prerequisite. No token
-exists yet; provide scoped fine-grained bootstrap instructions and safe local
-Secret Service storage. Do not expose credentials, rotate keys, rewrite existing
+User wants agent to create the repository, not a manual prerequisite. Token now
+stored in the scoped desktop Secret Service entry and authenticated as Grek-Off.
+Do not expose credentials, rotate keys, rewrite existing
 published history or delete the working GitLab update endpoint.
 
 Base HEAD7dd9c7f clean; successful GitLabv0.1.5 source/tag34b9655, pipeline
@@ -89,3 +89,42 @@ claim GitHub migration or CI completed before actual scoped access and proof.
   metadata parsed/validated. GitHub/GitLab verify installs .[dev] including build.
   Tooling checks and CI configuration are prepared; production GitHub publishing
   is deliberately not wired to an unprotected/unconfigured signing environment.
+
+## Verified checkpoint 2026-10-10: live GitHub migration
+
+- Public repository https://github.com/Grek-Off/tailtray, ID1413035535;
+  owner24355001. Reviewed9e8dc61 history and v0.1.0..v0.1.5 pushed normally.
+- Scoped PAT exists in Secret Service; API identity verified. Tell owner to
+  narrow temporary All repositories selection to tailtray; no new token needed.
+- Approved exact SECURITY.md is now authored. Private vulnerability reporting,
+  secret scanning/push protection enabled. Read-only default Actions, selected
+  GitHub-owned actions only. Active release-tag creation/admin and immutable
+  update/deletion rules. Environments release/github-pages restricted to tags
+  v*.*.*. Existing RSA3072 signing key copied to release environment secret,
+  fingerprint D432326D1167240864F8345763FA04F99681DA62; public export byte-equal
+  tracked key. No rotation or repo-wide secret. Pages build_type workflow enabled.
+- Git protocol defects reproduced and fixed: blank-line termination avoids
+  read-to-EOF deadlock; repeated wwwauth[]/capability[] fields are legitimate.
+  GUI askpass disabled only in migration subprocess. Regressions added.
+- First live CI38044845057: verify SUCCESS; source failed dubious ownership in
+  root container. Exact-workspace safe.directory env fix authored; not yet live
+  proven. Native/package/repo jobs correctly skipped, no false success.
+- Original GitLab v0.1.5 transferred without rebuilding/signing: ten original
+  assets, eleventh signed history archive with14payloads. Actual GPG checks,
+  tagged source equality, GitHub digest/size closure, safe rerun and fetch_previous
+  restoration PASS. Draft lookup needed authenticated listing fallback: by-tag
+  endpoint returned404 for existing draft. Regression added. GitLab untouched.
+- Confucius and Mill backend agents completed and CLOSED. Parent accepted/reviewed
+  files, further fixed refreshed upload acknowledgement and retry finalization.
+  No active writers. Parent owns all current pending files/integration.
+- Production workflow authored: read-only reusable CI -> protected signing/draft
+  ->4actual signed native consumers ->Pages ->4anonymous HTTPS consumers ->
+  release finalization with separate signed dist/public histories. v0.1.6 metadata
+  bumped; not tagged/released yet. New files require commit and live pipeline.
+- Full local developer suite222PASS,3nativeSKIP,184subtestsPASS,11.62s;
+  Ruff/static/diff whitespace PASS. Native suite is mandatory/no-skip in CI;
+  no strict local native PASS claimed (xvfb-run absent). Future GitHub release
+  immutability enabled and verified by API, existing release unchanged.
+- Next: commit verified integration, normal main push/CI; fix evidenced failures;
+  tag newv0.1.6 only after CI, prove release+anonymous consumers, protect main,
+  update verified docs/journal and commit. Never overwrite old tags/assets.

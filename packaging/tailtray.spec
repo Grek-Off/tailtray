@@ -1,5 +1,5 @@
 Name:           tailtray
-Version:        0.1.5
+Version:        0.1.6
 Release:        1%{?dist}
 Summary:        Native tray controller for the Tailscale daemon
 License:        MIT
@@ -56,6 +56,10 @@ done
 %{_datadir}/tailtray/icons/tailtray-hc-v2-*.png
 
 %changelog
+* Sat Oct 10 2026 Vladimir Grekov <grekov.vs@gmail.com> - 0.1.6-1
+- Publish source, native packages and signed update repositories on GitHub
+- Add protected releases, public contribution and security guidance
+
 * Fri Oct 09 2026 TailTray contributors <codex@local> - 0.1.5-1
 - Use immutable release links without invalid DEB download aliases
 

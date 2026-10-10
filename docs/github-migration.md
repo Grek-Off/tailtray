@@ -1,8 +1,12 @@
 # GitHub migration and local access
 
 Target: **Grek-Off/tailtray**, a public repository maintained by Vladimir Grekov.
-This is migration preparation, not a claim that the repository or GitHub
-pipeline has already been created or verified.
+The public repository exists with preserved `main` history and v0.1.0–v0.1.5
+tags. The proven v0.1.5 release was transferred byte-for-byte: ten original
+assets plus a signed history archive covering fourteen immutable v0.1.4/v0.1.5
+payloads. Restoring that archive and a non-mutating repeat publication were
+verified. GitHub v0.1.6 CI/public APT-DNF verification is the remaining gate;
+do not confuse prepared workflow YAML with a successful live release.
 
 ## One-time bootstrap token
 
@@ -12,7 +16,8 @@ Create a **fine-grained personal access token**, not a classic PAT:
 - Resource owner: `Grek-Off`.
 - Expiration: 30 days, or shorter if setup can be completed sooner.
 - Repository access: temporarily **All repositories** because `tailtray` does
-  not exist yet and cannot be selected.
+  has not been created and cannot be selected. **It now exists: narrow access
+  to Only select repositories → tailtray.**
 - Repository permissions, **Read and write**: Administration, Contents,
   Workflows, Actions, Pages, Environments.
 - Metadata: Read-only (automatic). No other account, organization or repository
@@ -81,3 +86,29 @@ from every process running as the same desktop user.
 
 The current working release is GitLab `v0.1.5`; installation and pinned signing
 key verification remain documented in [releases.md](releases.md).
+
+## Production workflow
+
+`release.yml` runs only for stable version tags created by the maintainer. It
+reuses the same read-only CI as pull requests. Only after all native runtime,
+packaging and ephemeral-signing rehearsal checks pass can the protected
+`release` environment expose the existing signing key. Signed package inputs
+and repository outputs are separate immutable workflow artifacts.
+
+The draft stays unpublished until native APT/DNF checks pass on all four target
+distributions, Pages deployment succeeds and anonymous HTTPS consumers obtain
+the exact tagged version. Finalization rechecks the tagged Git commit, source
+archive, complete asset set, hashes and signed repository history. GitHub
+release immutability locks newly published assets. Release workflows serialize
+and never cancel an in-progress deployment. Retry failed jobs with their original
+artifacts; never overwrite a conflicting release asset or move a version tag.
+
+Actions use short-lived `github.token`; the local bootstrap PAT is not a CI
+secret. Signing key is only an environment secret restricted to release tags.
+PR CI cannot inherit secrets or write releases. GitHub-owned actions are pinned
+to full commit SHAs. Container Git trusts only `github.workspace`, not `*`.
+
+The earlier GitLab endpoint remains available for installed clients. Switching
+an installed package repository is an explicit user action, not a hidden app
+update. The signing fingerprint remains
+`D432326D1167240864F8345763FA04F99681DA62`.
