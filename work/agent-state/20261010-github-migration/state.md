@@ -128,3 +128,19 @@ claim GitHub migration or CI completed before actual scoped access and proof.
 - Next: commit verified integration, normal main push/CI; fix evidenced failures;
   tag newv0.1.6 only after CI, prove release+anonymous consumers, protect main,
   update verified docs/journal and commit. Never overwrite old tags/assets.
+
+## Native CI proof before first GitHub tag
+
+- ecf4c54 published, GitHub CI38045306221 ALL12jobsSUCCESS: verify/source,
+  native RPM+installed runtime Fedora43/44, DEB+runtime Debian13/Ubuntu26.04,
+  real signing rehearsal and4native repository consumers, CI required gate.
+  Exact-workspace Git safe.directory fix is now live proven.
+- origin now GitHub HTTPS, old GitLab remote preserved as gitlab; main tracks
+  origin/main. Repository-local credential helper references scoped Secret
+  Service reader only (no token in config); normal Git uses the same safe wallet.
+- Parent added gate-checked protect-main tool +regression; focused31PASS/Ruff
+  PASS. Release/docs explain separate flat dist versus history-relative sums,
+  opt-in oldrepo switch, key preservation, protected job gates and retry rules.
+- Next commit metadata/docs/protection tooling, new annotated tagv0.1.6, run
+  Release production pipeline. Do not claim new Pages verified before all4live
+  consumers and finalization succeed. Agents closed; no background writers.

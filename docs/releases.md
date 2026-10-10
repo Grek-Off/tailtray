@@ -1,101 +1,84 @@
 # Пакеты, релизы и обновления
 
-Релиз создаётся автоматически после push защищённого тега `vX.Y.Z`, совпадающего
-с версией в `pyproject.toml`, RPM spec и Debian changelog. Все четыре нативные
-сборки и тесты должны пройти: частичный релиз не публикуется.
+Публичный проект: [Grek-Off/tailtray](https://github.com/Grek-Off/tailtray).
+Релиз создаётся после push защищённого тега `vX.Y.Z`, совпадающего с версиями
+в TOML, Python, RPM spec, Debian changelog и AppStream. Частичный релиз не
+публикуется. Статус — [Release workflow](https://github.com/Grek-Off/tailtray/actions/workflows/release.yml),
+готовые файлы — [Releases](https://github.com/Grek-Off/tailtray/releases).
 
-| Система | Пакет | Проверка CI |
+| Система | Пакеты | Проверка |
 | --- | --- | --- |
-| Fedora 43 | `.fc43.noarch.rpm` и `.fc43.src.rpm` | сборка и установка через dnf |
-| Fedora 44 | `.fc44.noarch.rpm` и `.fc44.src.rpm` | сборка и установка через dnf |
-| Debian 13 | `-1+debian13_all.deb` | сборка и установка через apt |
-| Ubuntu 26.04 | `-1+ubuntu26.04_all.deb` | сборка и установка через apt |
+| Fedora 43 | `.fc43.noarch.rpm`, `.fc43.src.rpm` | native build, установленный Qt/GTK runtime, DNF |
+| Fedora 44 | `.fc44.noarch.rpm`, `.fc44.src.rpm` | native build, установленный Qt/GTK runtime, DNF |
+| Debian 13 | `-1+debian13_all.deb` | native build, установленный Qt/GTK runtime, APT |
+| Ubuntu 26.04 | `-1+ubuntu26.04_all.deb` | native build, установленный Qt/GTK runtime, APT |
 
-Архитектура приложения `noarch` / `all`: Python-код без встроенных бинарных
-зависимостей. Установка и импорт зависимостей в CI проверяются на x86_64;
-самостоятельной end-to-end проверки на arm64 нет. Ubuntu 24.04 не включена:
-в её штатном архиве нет необходимых PySide6 QtWidgets/QtDBus.
+Архитектура приложения `noarch`/`all`: Python без встроенных бинарных зависимостей.
+CI проверяет x86_64; отдельного end-to-end arm64 прогона нет. Ubuntu 24.04 не
+включена: её штатный архив не содержит нужных PySide6 QtWidgets/QtDBus.
+Пакеты не включают Tailscale: сначала добавьте его официальный репозиторий.
+Установка не переключает VPN, не назначает operator, не запускает daemon и
+не создаёт автозапуск. Эти действия остаются за приложением и пользователем.
 
-Дополнительно публикуются исходники `tailtray-X.Y.Z.tar.gz`, `SHA256SUMS`,
-отдельная подпись `SHA256SUMS.asc` и публичный ключ. Файлы живут в Generic
-Package Registry, а не только во временных CI artifacts. Для загрузок и Releases
-API используется короткоживущий `CI_JOB_TOKEN`, персональный токен в CI не нужен.
-Опубликованный файл с тем же именем и версией никогда не перезаписывается.
+Дополнительно публикуются воспроизводимый `tailtray-X.Y.Z.tar.gz`, `SHA256SUMS`,
+подпись `SHA256SUMS.asc`, публичный ключ и `tailtray-repository-X.Y.Z.tar.gz` —
+подписанная история неизменяемых payloads. Архив исходников точно совпадает с
+`git archive` релизного коммита, сжатым `gzip -n`. Все одиннадцать assets живут
+в GitHub Release, а не только во временных workflow artifacts.
 
-## Автотесты CI
+## Автотесты и публикация
 
-На каждом branch/MR, до релизного тега:
+На main/PR и в reusable CI релиза выполняются:
 
-- Ruff, статические проверки и полный pytest: CLI, гонки refresh/операций,
-  disconnect/connect, operator/login, профили, exit node, предупреждения,
-  Qt/GTK/KDE и 100 независимых D-Bus запусков на регрессию краша.
-- JUnit и Cobertura доступны в GitLab; coverage включает Python subprocesses.
-  Это измерение покрытия, не заявление о 100% проверенных сценариев.
-- После сборки каждый RPM/DEB устанавливается в своём образе. Проверяются
-  модули и иконки, затем runtime-тесты импортируют `/usr/lib/tailtray`, а не
-  исходники checkout. Чисто релизные тесты не дублируются на каждом дистрибутиве.
-- Репетиция релиза подписывает копии семи артефактов одноразовым тестовым ключом
-  в tmpfs, строит настоящие APT/RPM индексы, проверяет восстановление истории,
-  повторный запуск и отказ при повреждённой подписи. Затем четыре нативных
-  потребителя проверяют эти индексы и пакеты. Ничего не публикуется.
+- Ruff, static-check, полный strict pytest: CLI, состояния/гонки,
+  disconnect/connect, operator/login, профили, exit nodes, Qt/GTK и D-Bus, включая
+  регрессию краша левого клика в 100 отдельных запусках.
+- JUnit и coverage artifacts; coverage учитывает subprocesses. Это измерение,
+  не обещание 100% проверенных сценариев.
+- Установка каждого RPM/DEB в родном образе. Runtime-тесты импортируют
+  `/usr/lib/tailtray`, а не checkout. Релизные tooling-тесты выполняются один раз.
+- Репетиция подписи копий семи артефактов одноразовым ключом в tmpfs, реальные
+  APT/RPM индексы, восстановление истории и четыре native потребителя.
 
-Пропуск теста в CI — ошибка. У тестов deadline 60с, у suite — 180с и ограничение
-адресного пространства 2ГиБ. Поддельные API имеют конечные лимиты запросов;
-query-параметры разбираются явно, не через поиск `page=1` в строке. Проверка
-лимита загрузки использует 64 байта вместо ненужного выделения 128МиБ.
-Настоящий релиз ждёт успешной репетиции и четырёх проверок репозиториев.
-Боевой ключ не используется в репетиции; ephemeral signing key не экспортируется
-в артефакты. Проверки не управляют VPN на пользовательском компьютере.
-
-Локальный запуск из checkout (нужны dev-зависимости и нативные Qt/GTK):
+В CI любой skip — ошибка. Deadline теста 60с, suite 180с, адресное пространство
+2ГиБ. Pagination и загрузки ограничены; повтор страницы — ошибка, query-параметры
+разбираются явно. Локальный запуск без native-зависимостей может иметь skips:
 
 ```fish
 env PYTHONPATH=src .venv/bin/python -m pytest
 ```
 
-Для полного native-покрытия нужен Xvfb, private D-Bus и KDE platform theme.
-Без них локальные проверки могут иметь skips; CI это не разрешает.
+Боевой release: read-only CI → защищённая подпись/draft → четыре проверки
+настоящего подписанного репозитория → Pages → четыре анонимных HTTPS APT/DNF
+потребителя → финальная проверка assets/истории → Release.
+Ключ не доступен PR CI и не используется в репетиции. Actions использует
+короткоживущий `github.token`, а не локальный PAT. Actions закреплены полными SHA;
+публикации сериализованы. Готовые новые releases защищены GitHub immutability.
 
-## Репозиторий для dnf / apt
+Сбой допускает повтор только с теми же исходными артефактами. Повтор проверяет
+существующие assets и не перезаписывает их. При конфликте hash/size публикация
+останавливается; перемещать старый тег или удалять assets для обхода нельзя.
+Повторяйте failed jobs исходного run: пересборка уже подписанной версии может
+дать отличающиеся native package bytes и закономерный конфликт.
 
-GitLab Generic Registry сам по себе не является apt/dnf-репозиторием. CI создаёт
-подписанные индексы RPM и APT и сохраняет их в артефакте `public/`. GitLab Pages
-может раздавать эту папку по постоянному HTTPS-адресу. Метаданные APT подписаны
-через `InRelease` / `Release.gpg`; у RPM подписаны пакеты и `repomd.xml`.
+## Репозиторий для DNF / APT
 
-Владелец разрешил публичную раздачу пакетов и исходных архивов. Git-проект и
-Generic Registry остаются приватными; только дерево `public/` раздаётся через
-Pages с доступом `Everyone`. Адрес, полученный из API Pages:
-`https://tailtray-657378.gitlab.io`. Публикацию включает protected-переменная
-`TAILTRAY_PUBLISH_REPOSITORY=1`, а protected `TAILTRAY_REPOSITORY_URL` задаёт
-этот HTTPS-адрес для проверки после deployment. Токен GitLab в apt/dnf не нужен
-и не должен попадать в `.repo`, URL или shell history.
+GitHub Releases сами по себе не являются APT/DNF-репозиторием. Pages раздаёт
+статическое дерево подписанных индексов и пакетов:
+`https://grek-off.github.io/tailtray`.
+APT проверяет `InRelease`/`Release.gpg`; RPM проверяет пакеты и `repomd.xml`.
+Токен, GitHub-аккаунт или вход в браузере потребителям не нужны.
 
-Каждый защищённый release-тег проходит четыре проверки опубликованного HTTPS
-репозитория: Fedora 43/44, Debian 13 и Ubuntu 26.04. Они анонимно скачивают
-публичный ключ с pinned fingerprint и подписанный manifest текущей версии,
-проверяют индексы штатным apt/dnf и скачивают пакет с проверкой подписи/checksum.
-Эти проверки выполняются только в disposable CI images, не на рабочей машине.
-
-Первый успешный публичный выпуск — `v0.1.5`, коммит
-`34b965591aa4e9463dc6a7565ed1b6aad96d96df`. [Release pipeline](https://gitlab.com/grekov-labs/tailtray/-/pipelines/2930998441)
-прошёл все 21 задание и 707 тестовых проверок без ошибок и skips. Независимо
-скачаны и проверены 10 release assets, подписи checksums/manifest и все 14
-публичных payloads (история `0.1.4` + `0.1.5`). Распакованный исходный архив
-побайтно совпадает с `git archive` коммита тега. Старые теги не переписаны.
-
-Перед установкой добавьте [официальный репозиторий Tailscale](https://pkgs.tailscale.com/stable/).
-Затем из проверенного checkout выполните (команда совместима с fish):
+Для новой установки, после успешного Release workflow:
 
 ```fish
-bash scripts/install-repository.sh https://tailtray-657378.gitlab.io
+bash scripts/install-repository.sh https://grek-off.github.io/tailtray
 ```
 
-Скрипт проверяет дистрибутив и fingerprint публичного ключа, добавляет только
-TailTray-репозиторий и устанавливает пакет. Существующую отличающуюся конфигурацию
-или ключ не перезаписывает. На Fedora остаются включены `gpgcheck=1` и
-`repo_gpgcheck=1`; APT использует отдельный `Signed-By`, без `trusted=yes`.
-После подключения этого репозитория новые релизы приходят обычным способом:
+Скрипт проверяет ОС и pinned fingerprint, добавляет только TailTray и устанавливает
+пакет. Отличающиеся конфигурации и ключи не перезаписывает. Fedora:
+`gpgcheck=1`, `repo_gpgcheck=1`. APT: отдельный `Signed-By`, без `trusted=yes`.
+Обновления после подключения приходят штатно:
 
 ```fish
 sudo dnf upgrade --refresh       # Fedora
@@ -103,48 +86,56 @@ sudo apt-get update             # Debian / Ubuntu
 sudo apt-get upgrade
 ```
 
-Предыдущие пакеты сохраняются. CI восстанавливает историю из подписанного
-manifest в Generic Registry и проверяет hash каждого файла; сетевые/permission
-ошибки не трактуются как «первый релиз». Старый тег не может откатить Pages к
-репозиторию без более свежего опубликованного релиза.
+Прежний `https://tailtray-657378.gitlab.io` сохранён. Уже установленные клиенты
+не переключаются скрыто. Для добровольного перехода сохраните копию своего
+TailTray repo-файла и отредактируйте только его через `sudoedit`:
 
-В Registry неизменяемые payloads хранятся под плоскими именами `payload-<sha256
-пути>`: реальный API GitLab возвращает HTTP 500 для сочетания вложенного пути
-и `+` в имени DEB. Подписанный manifest с `registry_layout=flat-v1` сохраняет
-нативные пути apt/dnf, а восстановление истории проверяет подпись и hash
-каждого файла. Старый manifest без этого поля читается в прежнем формате.
+- Fedora: `/etc/yum.repos.d/tailtray.repo`; в `baseurl` и `gpgkey` замените
+  `https://tailtray-657378.gitlab.io` на `https://grek-off.github.io/tailtray`.
+  Оставьте `/rpm/fedora/$releasever/`, `gpgcheck=1` и `repo_gpgcheck=1`.
+- Debian/Ubuntu: `/etc/apt/sources.list.d/tailtray.sources`; замените только
+  начало `URIs` на `https://grek-off.github.io/tailtray/apt`. Suite и отдельный
+  `/usr/share/keyrings/tailtray-archive-keyring.asc` в `Signed-By` не меняйте.
 
-## Подпись и выпуск следующей версии
+Ключ и fingerprint одинаковы на обоих каналах. После редактирования обновите
+метаданные; при ошибке верните сохранённый repo-файл. Не отключайте проверку
+подписи. Автоматическое удаление старого канала не требуется.
+
+## Подпись и следующий выпуск
 
 Fingerprint: `D432326D1167240864F8345763FA04F99681DA62`.
-Публичный ключ: `packaging/repository-key.asc`. Приватный ключ не входит в Git,
-tar.gz, пакеты или artifacts. Локальная резервная копия находится в Secret Service
-с атрибутами `application=tailtray purpose=release-signing project=86100130`.
-GitLab хранит base64 ключа в protected/masked/hidden **file** variable
-`TAILTRAY_SIGNING_KEY`; fingerprint — в protected `TAILTRAY_SIGNING_FINGERPRINT`.
-Расшифровка и импорт выполняются только в tmpfs release-job. Ключ имеет срок
-действия два года; его замена должна быть отдельной согласованной процедурой.
+Ключ: `packaging/repository-key.asc`. Приватный ключ не входит в Git, tar.gz,
+пакеты или artifacts. Резервная копия — запись Secret Service
+`application=tailtray purpose=release-signing project=86100130`, не plaintext-файл.
+GitHub хранит тот же base64 ключ как environment secret `TAILTRAY_SIGNING_KEY`
+в `release`, разрешённом только тегам `v*.*.*`; импорт — только в tmpfs.
+Ключ действует два года; замена требует отдельной согласованной процедуры.
 
-Для первоначальной настройки другого проекта предусмотрен
-`python3 scripts/setup-release-signing.py --project PROJECT_ID` на Linux desktop
-с Secret Service и авторизованным glab. Команда не заменяет существующие CI
-переменные, не печатает приватный ключ и не использует plaintext backup.
-Публичный ключ и fingerprint другого проекта нужно явно обновить в исходниках
-после проверки. Повторно выполнять setup в уже настроенном проекте не нужно.
-
-Для следующего релиза обновите версии в TOML, `src/tailtray/__init__.py`, RPM spec, Debian changelog и
-AppStream metainfo, проверьте изменения и отправьте:
+Обновите пять версий, changelog, проверьте и закоммитьте изменения. После CI:
 
 ```fish
 git tag -a vX.Y.Z -m 'TailTray X.Y.Z'
 git push origin vX.Y.Z
 ```
 
-CI использует GitLab shared runners без privileged mode или Docker socket.
-Установка пакета не делает logout/reset, не меняет operator/exit node, не
-перезапускает daemon и не создаёт autostart. Управление этими действиями остаётся
-за приложением и пользователем.
+`origin` — GitHub; старый remote сохранён как `gitlab`. Локальный PAT остаётся
+в Secret Service: [доступ и настройки](github-migration.md).
+Main требует успешный all-jobs CI для PR; maintainer/admin может выполнять
+обычные прямые изменения. Force-push и удаление main/релизных тегов запрещены.
 
-Документация: [Generic Packages](https://docs.gitlab.com/user/packages/generic_packages/),
-[job token API](https://docs.gitlab.com/ci/jobs/ci_job_token/),
-[Pages access control](https://docs.gitlab.com/user/project/pages/pages_access_control/).
+## Сохранённый GitLab канал
+
+Первый полностью проверенный публичный выпуск — GitLab `v0.1.5`, коммит
+`34b965591aa4e9463dc6a7565ed1b6aad96d96df`,
+[pipeline 2930998441](https://gitlab.com/grekov-labs/tailtray/-/pipelines/2930998441):
+21 job, 707 JUnit checks, без ошибок/skips. GitLab Git/Generic Registry приватны,
+Pages открыты. Старые конфигурации и релизы не удалены.
+
+GitHub v0.1.5 содержит десять оригинальных файлов и подписанную историю четырнадцати
+payloads v0.1.4/v0.1.5; перенос не пересобирал пакеты и не менял подписи.
+Архив истории восстановлен и повторная публикация без изменений проверена.
+Более ранние development tags сохранены, но не объявлены успешными releases.
+
+Источники: [GitHub Releases API](https://docs.github.com/en/rest/releases/releases),
+[Pages deployment](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages),
+[immutable releases](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes).

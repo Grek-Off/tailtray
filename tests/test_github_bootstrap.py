@@ -87,6 +87,15 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "authorized GitHub owner"):
             api.identity()
 
+    def test_main_protection_requires_real_successful_all_jobs_gate(self):
+        api = Mock()
+        api.repository.return_value = {"private": False, "default_branch": "main"}
+        api.request.return_value = {"check_runs": [{"name": "CI required", "conclusion": "failure",
+                                                    "app": {"slug": "github-actions", "id": 1}}]}
+        with self.assertRaisesRegex(RuntimeError, "CI gate passes"):
+            bootstrap.protect_main(api)
+        self.assertTrue(all(call.args[0] == "GET" for call in api.request.call_args_list))
+
     def test_signing_requires_tag_only_environment_and_refuses_secret_replacement(self):
         api = Mock()
         api.request.side_effect = [{"deployment_branch_policy": {"custom_branch_policies": True}},

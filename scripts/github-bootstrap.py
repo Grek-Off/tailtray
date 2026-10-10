@@ -251,10 +251,35 @@ def pages(api):
     print(json.dumps({"pages_url": current["html_url"], "build_type": current["build_type"]}))
 
 
+def protect_main(api):
+    repo = api.repository()
+    if repo["private"] or repo["default_branch"] != "main":
+        raise RuntimeError("Main protection requires the authorized public default branch")
+    runs = api.request("GET", PREFIX + "/commits/main/check-runs?per_page=100")["check_runs"]
+    gate = next((run for run in runs if run["name"] == "CI required"
+                 and run["conclusion"] == "success" and run["app"]["slug"] == "github-actions"), None)
+    if gate is None:
+        raise RuntimeError("Protect main only after the actual all-jobs CI gate passes")
+    api.request("PUT", PREFIX + "/branches/main/protection", {
+        "required_status_checks": {"strict": True, "checks": [{"context": "CI required", "app_id": gate["app"]["id"]}]},
+        "enforce_admins": False,
+        "required_pull_request_reviews": {"dismiss_stale_reviews": True, "required_approving_review_count": 0},
+        "restrictions": None, "required_linear_history": True,
+        "allow_force_pushes": False, "allow_deletions": False, "required_conversation_resolution": True})
+    rules = api.request("GET", PREFIX + "/rulesets")
+    name = "Preserve public main history"
+    if not any(rule["name"] == name for rule in rules):
+        api.request("POST", PREFIX + "/rulesets", {
+            "name": name, "target": "branch", "enforcement": "active", "bypass_actors": [],
+            "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+            "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}]})
+    print("Main requires successful GitHub Actions CI on PRs; no force-push/deletion bypass.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("inspect", "create", "public", "configure", "signing", "pages",
-                                           "push", "git-credential"))
+                                           "push", "git-credential", "protect-main"))
     parser.add_argument("credential_action", nargs="?")
     parser.add_argument("--reviewed-commit", help="Publish only this already-reviewed main commit during ongoing work")
     args = parser.parse_args()
@@ -267,8 +292,8 @@ def main():
         if args.action == "configure":
             configure(api)
             return 0
-        if args.action in ("signing", "pages"):
-            (signing if args.action == "signing" else pages)(api)
+        if args.action in ("signing", "pages", "protect-main"):
+            {"signing": signing, "pages": pages, "protect-main": protect_main}[args.action](api)
             return 0
         if args.action == "push":
             if api.repository() is None:
