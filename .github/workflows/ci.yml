@@ -1,0 +1,277 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tailtray-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONFAULTHANDLER: '1'
+  QT_QPA_PLATFORM: offscreen
+  CI_COMMIT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:43
+      options: --cpus=2 --memory=4g
+    timeout-minutes: 30
+    steps:
+      - name: Install verification dependencies before checkout
+        run: dnf install -y --setopt=install_weak_deps=False git make diffutils gobject-introspection python3 python3-pip python3-pyside6 python3-gobject plasma-integration libayatana-appindicator-gtk3 libsecret libnotify dbus-daemon dbus-tools xorg-x11-server-Xvfb xorg-x11-xauth desktop-file-utils libxml2 util-linux
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install project
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/pip install -e '.[dev]'
+      - name: Lint, strict native tests, static checks, and build
+        run: |
+          mkdir -p reports
+          .venv/bin/ruff check src tests scripts
+          timeout --kill-after=5s 180s prlimit --as=2147483648 -- xvfb-run -a env PYTHONPATH=src TAILTRAY_TEST_NATIVE_MENU=1 TAILTRAY_TEST_STRICT=1 .venv/bin/python -m pytest -q --junitxml=reports/unit.xml --cov=tailtray --cov-branch --cov-report=term-missing --cov-report=xml:reports/coverage.xml
+          make static-check
+          .venv/bin/python -m build
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-evidence
+          path: |
+            dist/
+            reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  source:
+    runs-on: ubuntu-24.04
+    container:
+      image: python:3.13-slim-trixie
+      options: --cpus=2 --memory=2g
+    timeout-minutes: 30
+    steps:
+      - name: Install source dependencies before checkout
+        run: apt-get update -qq && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build reproducible source archive
+        run: bash scripts/build-packages.sh source
+      - name: Upload source archive
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  rpm:
+    needs: source
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fedora43
+            image: fedora:43
+          - target: fedora44
+            image: fedora:44
+    container:
+      image: ${{ matrix.image }}
+      options: --cpus=2 --memory=4g
+    timeout-minutes: 30
+    env:
+      TARGET_DISTRO: ${{ matrix.target }}
+    steps:
+      - name: Install build dependencies before checkout
+        run: dnf install -y --setopt=install_weak_deps=False git rpm-build python3 curl
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: source
+          path: dist
+      - name: Build and test native RPM
+        run: |
+          bash scripts/build-packages.sh rpm
+          rpm -qpl dist/*.rpm
+          bash scripts/smoke-package.sh rpm
+          bash scripts/test-installed-package.sh
+      - name: Upload RPM packages
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.target }}
+          path: dist/*.rpm
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-${{ matrix.target }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deb:
+    needs: source
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: debian13
+            image: debian:trixie-slim
+          - target: ubuntu26.04
+            image: ubuntu:26.04
+    container:
+      image: ${{ matrix.image }}
+      options: --cpus=2 --memory=4g
+    timeout-minutes: 30
+    env:
+      TARGET_DISTRO: ${{ matrix.target }}
+    steps:
+      - name: Install build dependencies before checkout
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends git python3 dpkg-dev debhelper-compat fakeroot make build-essential curl ca-certificates
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: source
+          path: dist
+      - name: Build and test native DEB
+        run: |
+          bash scripts/build-packages.sh deb
+          dpkg-deb --contents dist/*.deb
+          bash scripts/smoke-package.sh deb
+          bash scripts/test-installed-package.sh
+      - name: Upload DEB packages
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.target }}
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-${{ matrix.target }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release-rehearsal:
+    needs: [source, rpm, deb]
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:43
+      options: --cpus=2 --memory=4g
+    timeout-minutes: 30
+    env:
+      TAILTRAY_REHEARSAL_CONTAINER: '1'
+    steps:
+      - name: Install rehearsal dependencies before checkout
+        run: dnf install -y --setopt=install_weak_deps=False git python3 gnupg2 rpm-sign createrepo_c dpkg
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: source
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - name: Sign and verify offline release rehearsal
+        run: |
+          export SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          timeout --kill-after=5s 180s python3 tests/release_rehearsal.py --artifacts dist --output public-test
+      - name: Upload release rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-rehearsal
+          path: public-test/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  repository-rehearsal:
+    needs: release-rehearsal
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fedora43
+            image: fedora:43
+          - target: fedora44
+            image: fedora:44
+          - target: debian13
+            image: debian:trixie-slim
+          - target: ubuntu26.04
+            image: ubuntu:26.04
+    container:
+      image: ${{ matrix.image }}
+      options: --cpus=2 --memory=3g
+    timeout-minutes: 30
+    env:
+      TARGET_DISTRO: ${{ matrix.target }}
+      TAILTRAY_REPOSITORY_DIR: public-test
+    steps:
+      - name: Install consumer dependencies before checkout
+        run: |
+          if [[ $TARGET_DISTRO == fedora* ]]; then
+            dnf install -y --setopt=install_weak_deps=False git curl-minimal gnupg2 python3
+          else
+            apt-get update -qq
+            apt-get install -y --no-install-recommends git curl ca-certificates gnupg python3
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-rehearsal
+          path: public-test
+      - name: Consume signed repository with native tools
+        run: timeout --kill-after=5s 180s bash scripts/check-native-repository.sh
+      - name: Upload repository evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: repository-${{ matrix.target }}
+          path: public-test/
+          if-no-files-found: ignore
+          retention-days: 7

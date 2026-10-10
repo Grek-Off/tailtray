@@ -25,4 +25,5 @@ timeout --kill-after=5s 180s prlimit --as=2147483648 -- \
     TAILTRAY_TEST_NATIVE_MENU=1 TAILTRAY_TEST_STRICT=1 \
     .runtime-venv/bin/python -m pytest -q --junitxml="reports/runtime-$TARGET_DISTRO.xml" \
     --ignore=tests/test_packaging.py --ignore=tests/test_release.py \
+    --ignore=tests/test_github_ci.py --ignore=tests/test_github_credentials.py \
     --ignore=tests/test_repository.py --ignore=tests/test_repository_deploy.py
