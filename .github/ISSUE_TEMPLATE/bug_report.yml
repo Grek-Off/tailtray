@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible problem in TailTray.
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing reports first. Never post an auth key, login URL,
+        token, private IP address, or unredacted full status/diagnostic output.
+        Redact hostnames, usernames, tailnet names, and other private details.
+  - type: input
+    id: summary
+    attributes:
+      label: Short summary
+      description: What went wrong?
+      placeholder: The tray menu stays stale after disconnecting
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and version
+      description: Include the Linux distribution and release.
+      placeholder: Fedora 43
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop and version
+      description: Include GNOME/KDE/another desktop and its version.
+      placeholder: KDE Plasma 6.5
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: TailTray, Tailscale, and Python versions
+      description: Include versions relevant to the report.
+      placeholder: TailTray 0.1.5; Tailscale 1.x; Python 3.13
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest sequence that reproduces the problem.
+      placeholder: |
+        1. Start TailTray
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Paste only a short, redacted excerpt if useful; do not paste full status output.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted diagnostics
+      description: Optional. Remove auth keys, login URLs, tokens, private IPs, and private names.
+      render: text
+    validations:
+      required: false
