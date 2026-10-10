@@ -173,3 +173,21 @@ claim GitHub migration or CI completed before actual scoped access and proof.
   ignore added. Parent final docs/proof/release-notes changes pendingcommit+CI.
 - Next: publish final documentation/tooling commit, confirm latest main CI,
   preserve oldGitLab endpoint availability, final concise links/reminderPATscope.
+
+## Final handoff — objective achieved
+
+- Tested implementation/documentation6435011bdca2548dbe84d61442f3c6dd2692733b
+  is on origin/main. CI38046325423 SUCCESS, all12jobs incl CI required successful.
+- Release23jobs successful; raw five JUnit reports independently parsed:
+  unit410 + four native runtime286 each =1554JUnitchecks,0errors/0failures/0skips.
+  These include repeated distro coverage/subtests, not1554unique test functions.
+- Public no-credential verification PASS for11immutable assets,21signed payloads,
+  source/tag identity and history restoration. Old public GitLab manifest still
+  lists14payloads/versions0.1.4+0.1.5; confirmed anonymously afternewdeployment.
+- Release description updated to link changelog/install/signatures and supported
+  targets. API confirmed unchanged asset digests and immutabletrue afterward.
+- All agents closed; no remaining work writers, VM/host VPN/package mutations,
+  key rotation, force-push or legacy channel deletion. Owner should narrow PAT
+  to selected tailtray repository if temporary All repositories remains enabled.
+- This final journal-only checkpoint is committed with skip-ci to avoid launching
+  a new native build solely to record completion; verified code/tree unchanged.
