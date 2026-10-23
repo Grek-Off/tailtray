@@ -7,10 +7,10 @@ assets plus a signed history archive covering fourteen immutable v0.1.4/v0.1.5
 payloads. Restoring that archive and a non-mutating repeat publication were
 verified. GitHub [v0.1.6](https://github.com/Grek-Off/tailtray/releases/tag/v0.1.6)
 and [production pipeline](https://github.com/Grek-Off/tailtray/actions/runs/38045667801)
-are now successful: all23jobs, four native builds/installed runtimes, protected
+are now successful: all 23 jobs, four native builds/installed runtimes, protected
 signing, four signed repository checks, Pages, four anonymous native HTTPS
-consumers and finalization. Separate token-free verification confirmed11immutable
-assets,21signed historical payloads, signatures and exact tagged source archive.
+consumers and finalization. Separate token-free verification confirmed 11 immutable
+assets, 21 signed historical payloads, signatures and the exact tagged source archive.
 
 ## One-time bootstrap token
 
@@ -19,8 +19,8 @@ Create a **fine-grained personal access token**, not a classic PAT:
 - Name: `tailtray-bootstrap`.
 - Resource owner: `Grek-Off`.
 - Expiration: 30 days, or shorter if setup can be completed sooner.
-- Repository access: temporarily **All repositories** because `tailtray` does
-  has not been created and cannot be selected. **It now exists: narrow access
+- Repository access: temporarily **All repositories** only if `tailtray` has
+  not been created yet and cannot be selected. **It now exists: narrow access
   to Only select repositories → tailtray.**
 - Repository permissions, **Read and write**: Administration, Contents,
   Workflows, Actions, Pages, Environments.

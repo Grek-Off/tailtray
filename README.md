@@ -14,7 +14,7 @@ verified distribution channel. The public source and preserved tags are on
 [GitHub](https://github.com/Grek-Off/tailtray); the
 [migration checklist](docs/github-migration.md) records release verification.
 
-Maintained by [Владимир Греков / Vladimir Grekov](https://github.com/Grek-Off),
+Maintained by [Vladimir Grekov](https://github.com/Grek-Off),
 with AI-assisted development by Codex/OpenAI. See [credits](CONTRIBUTORS.md),
 [contribution guide](CONTRIBUTING.md), [security policy](SECURITY.md),
 [code of conduct](CODE_OF_CONDUCT.md) and
@@ -22,235 +22,231 @@ the [MIT license](LICENSE). TailTray is not an official Tailscale product and
 is not endorsed by Tailscale or OpenAI. Its independently drawn dot-grid icon
 does not change that affiliation.
 
-## Документация на русском
+## Overview
 
-Неофициальный нативный tray-клиент для официального Tailscale daemon на
-Linux. Первая целевая платформа — Fedora с GNOME или KDE.
+TailTray was initially developed for Fedora with GNOME or KDE. It provides a
+compact desktop interface to the official Tailscale system service: the VPN
+engine, WireGuard keys, device identity and node state remain managed by
+`tailscaled`.
 
-TailTray не реализует VPN и не заменяет `tailscaled`: сетевой движок,
-WireGuard-ключи, device identity и состояние узла остаются в официальном
-системном сервисе. Приложение даёт ему компактный desktop-интерфейс.
+## Features
 
-## Что уже работает
+- Connect and disconnect without opening a terminal.
+- View connection status, device name, Tailscale IP addresses and health warnings.
+- High-contrast Tailscale-style dot-grid icon: black and white dots with opposite
+  outlines remain visible on light and dark panels. KDE Plasma uses a dedicated
+  set of RGBA PNGs that the desktop theme cannot recolor.
+- Native Qt 6 tray/menu backend on KDE Plasma, with GTK/AppIndicator as a fallback
+  for GNOME and other desktops.
+- Compact top-level menu for essential actions; accounts, preferences,
+  authentication, maintenance and application settings live in submenus.
+- List devices in the current tailnet, their online/offline state and all
+  Tailscale IP addresses; click an address to copy it.
+- Dedicated `Tailnet` menu for switching saved networks/profiles and adding a new one.
+- Select, disable or automatically choose an exit node.
+- Manage DNS, subnet routes, LAN access through an exit node, shields-up and update checks.
+- Start `tailscaled` and grant the current user operator permissions through the
+  standard polkit dialog.
+- Check operator permissions at startup and after profile changes; repair them
+  before automatic sign-in, without repeated password prompts after cancellation.
+- Full restart: `tailscale down` → restart the systemd service → wait for the
+  daemon → `tailscale up`.
+- Automatically reconnect after an unexpected `Stopped` state, with bounded
+  backoff. A manual **Disconnect** is remembered and never undone automatically.
+- Distinguish active, unavailable and unknown exit-node states; a health warning
+  is not treated as proof that the exit node has failed.
+- Start automatically with the desktop session.
+- Standard one-time browser sign-in.
+- Optional unattended sign-in with an auth key stored in GNOME Keyring/libsecret.
 
-- подключение и отключение без запуска терминала;
-- состояние, имя устройства, Tailscale IP и проблемы health check;
-- самоконтрастная dot-grid иконка в стиле Tailscale: чёрно-белые точки с
-  противоположным контуром видны на светлой и тёмной панели; для KDE Plasma
-  используется приватный набор RGBA PNG, который не перекрашивается темой;
-- нативный Qt 6 tray/menu backend на KDE Plasma; GTK/AppIndicator остаётся
-  fallback-ом для GNOME и других окружений;
-- компактное верхнее меню только с основными действиями; аккаунты, настройки,
-  авторизация, обслуживание и параметры приложения разложены по вложенным меню;
-- список устройств текущего tailnet с online/offline состоянием и всеми
-  Tailscale IP (клик копирует адрес);
-- отдельное меню `Tailnet`: переключение сохранённых сетей/профилей и добавление новой;
-- выбор, отключение и автоматический подбор exit node;
-- DNS, subnet routes, LAN access через exit node, shields-up и update check;
-- запуск `tailscaled` и выдача текущему пользователю operator-прав через
-  стандартный polkit-диалог;
-- проверка operator при запуске и после смены профиля; восстановление прав
-  до автологина, без повторных запросов пароля после отмены;
-- полный restart: `tailscale down` → restart systemd service → ожидание daemon →
-  `tailscale up`;
-- автоматический реконнект после неожиданного `Stopped` с ограниченным backoff;
-  ручной **Disconnect** сохраняется как намерение и не отменяется автоматикой;
-- состояние exit node различает активный, недоступный и неизвестный статус;
-  health-предупреждение не выдаётся за доказанный отказ узла;
-- автозапуск вместе с desktop-сессией;
-- обычный однократный browser login;
-- опциональный unattended login с auth key в GNOME Keyring/libsecret.
+## Control permissions and sign-in recovery
 
-## Права управления и восстановление входа
+On the first fresh status response, TailTray reads `operator` from
+`tailscale get --json all`. If it names a different user or is empty, the app runs
+`pkexec tailscale set --operator=UNIX_USER` for the current Unix user. The system
+polkit dialog requests the password; TailTray never receives or stores it.
+Permissions are checked again after the command, then browser sign-in is offered
+if the daemon reports `NeedsLogin`. No password prompt appears if the operator
+is already correct.
 
-На первом свежем статусе TailTray читает `operator` из `tailscale get --json all`.
-Если указан другой пользователь или operator пуст, приложение запускает
-`pkexec tailscale set --operator=<текущий Unix-пользователь>`: пароль запрашивает
-системный polkit, TailTray его не получает и не хранит. После команды права
-проверяются повторно, затем при `NeedsLogin` предлагается вход в браузере.
-Если operator уже правильный, запрос пароля не появляется.
+Cancellation or failure does not open a new dialog on every poll. The menu keeps
+`Grant this user control…` and the error text available for an explicit retry,
+also accessible through `More → Authentication`. That submenu also contains
+`Sign in…`. A timeout or an unsupported `get` command leaves permissions unknown;
+it is not evidence that no operator is configured. Control permissions do not
+replace VPN status: the network can work even when the current user cannot
+change its settings.
 
-Отмена или ошибка не запускает новые диалоги на каждом опросе. В меню остаются
-`Grant this user control…` и текст ошибки; повторить можно вручную, также через
-`More → Authentication`. Там же есть `Sign in…`. Неизвестные права при таймауте
-или неподдерживаемом `get` не считаются доказанным отсутствием operator.
-Права управления не подменяют статус VPN: сеть может работать, даже если этот
-пользователь пока не может менять настройки.
+Restoring sign-in to the current profile uses **bare `tailscale up`**, without
+logout/reset or changes to the exit node or DNS. `tailscale login` is used only
+when adding a new network because it creates an empty profile. Neither operator
+checks nor automatic sign-in override a manual Disconnect.
 
-Восстановление входа в текущий профиль использует **bare `tailscale up`**, без
-logout/reset и без изменения exit node/DNS. `tailscale login` используется
-только при добавлении новой сети: эта команда создаёт пустой профиль.
-Ручной Disconnect не отменяется ни проверкой operator, ни автологином.
+## Switching tailnets
 
-## Переключение tailnet
+Choose a saved network from **Tailnet: …**. Both the tailnet name and account are
+shown so that networks sharing one login remain distinguishable. Switching calls
+`tailscale switch PROFILE_ID` without logout, reset or another login. Devices,
+exit nodes and preferences are refreshed from the daemon's new response.
 
-В меню **Tailnet: …** выберите сохранённую сеть. Показываются название tailnet
-и аккаунт, поэтому сети под одним логином различимы. Переключение вызывает
-`tailscale switch PROFILE_ID` без logout, reset или повторного login. Списки
-устройств, exit node и настройки обновляются из нового ответа daemon.
+If the network is not saved yet, choose **Add tailnet…** and complete the official
+browser sign-in, selecting the intended tailnet. A web-console session alone
+does not add a profile to this computer. Adding a tailnet switches the client to
+the new sign-in; if you change your mind, use the same menu to return to a saved
+network. Only one network is active at a time. Reauthentication is necessary if
+the profile has not been added or its device key has expired:
+[official fast user switching documentation](https://tailscale.com/docs/features/client/fast-user-switching).
 
-Если нужной сети ещё нет, выберите **Add tailnet…** и завершите официальный
-вход в браузере, выбрав нужную tailnet. Сессия веб-консоли сама по себе не
-добавляет профиль на компьютер. При добавлении клиент переключается на новый
-вход; если передумали, можно вернуться к сохранённой сети через это же меню.
-Одновременно активна только одна сеть. Повторная авторизация нужна, если
-профиль ещё не добавлен или его ключ устройства истёк:
-[официальный fast user switching](https://tailscale.com/docs/features/client/fast-user-switching).
+The optional reusable auth key stays in the keyring; the config stores only its
+profile ID. Set up the key after signing in to the intended network. Switching
+tailnets never automatically uses another network's key. A legacy unbound key
+is migrated automatically only from an unambiguous single-profile configuration.
+If several profiles already exist, set up the key again in the intended network.
 
-Опциональный reusable auth key остаётся в keyring; в config хранится только
-ID его профиля. Задавать ключ нужно после входа в нужную сеть. При смене tailnet
-ключ другой сети автоматически не используется. Старый ключ без привязки
-переносится автоматически только из однозначной однопрофильной конфигурации;
-если профилей уже несколько, задайте ключ заново в нужной сети.
+## Why this is not a port of the official Windows GUI
 
-## Почему не порт официального Windows GUI
+The official Windows GUI source is not available. The
+[`tailscale/tailscale`](https://github.com/tailscale/tailscale) repository contains
+the daemon, CLI and much of the shared logic, but Tailscale states that the
+Windows and macOS GUI wrappers are closed source. TailTray therefore implements
+its own interface using the public contracts and behavior of the official
+[`client/systray`](https://github.com/tailscale/tailscale/blob/main/client/systray/systray.go).
 
-Официальных исходников Windows GUI нет. В
-[`tailscale/tailscale`](https://github.com/tailscale/tailscale) открыты daemon,
-CLI и большая часть общей логики, но Tailscale отдельно указывает, что GUI
-wrappers для Windows и macOS закрыты. Поэтому TailTray опирается на открытые
-контракты и поведение официального
-[`client/systray`](https://github.com/tailscale/tailscale/blob/main/client/systray/systray.go),
-а интерфейс реализует самостоятельно.
+## Installing on Fedora
 
-## Установка на Fedora
+First install the official Tailscale package from its repository. Then run:
 
-Сначала установите официальный Tailscale из его репозитория. Затем:
-
-```bash
+```fish
 ./scripts/install-fedora.sh
 tailtray
 ```
 
-Installer проверяет зависимости, останавливает только установленный экземпляр
-TailTray, устанавливает файлы приложения, побайтно сверяет каждый Python-модуль
-с checkout и запускает проверенную версию. Это также работает, если предыдущий
-экземпляр уже успел упасть. Затем installer включает `tailscaled`, назначает
-текущего пользователя operator-ом и добавляет TailTray в
-`~/.config/autostart`. Он не выполняет Tailscale logout/reset и не меняет
-настройки tailnet. Проверить, совпадает ли установленная версия с checkout,
-можно без `sudo`:
+The installer checks dependencies, stops only the installed TailTray instance,
+installs the application files, compares every installed Python module
+byte-for-byte with the checkout and starts the verified version. It also works
+if the previous instance has already crashed. The installer then enables
+`tailscaled`, assigns the current user as its operator and adds TailTray to
+`~/.config/autostart`. It does not log out of Tailscale, reset it or change
+tailnet preferences. Check whether the installed version matches the checkout
+without `sudo`:
 
-```bash
+```fish
 ./scripts/install-fedora.sh --check
 ```
 
-Для ручной установки зависимостей:
+To install dependencies manually:
 
-```bash
+```fish
 sudo dnf install tailscale python3-gobject python3-pyside6 libappindicator-gtk3 libsecret libnotify
 ```
 
-GNOME по умолчанию может не показывать StatusNotifier/AppIndicator icons. Если
-иконки нет, установите и включите расширение:
+GNOME may not show StatusNotifier/AppIndicator icons by default. If the icon is
+missing, install and enable the extension:
 
-```bash
+```fish
 sudo dnf install gnome-shell-extension-appindicator
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 ```
 
-В KDE Plasma дополнительное расширение обычно не требуется. TailTray передаёт
-Plasma собственный каталог растровых tray-иконок, чтобы исключить подхват старой
-symbolic-иконки из глобального кэша темы. На KDE автоматически выбирается
-нативный Qt 6 backend: дерево меню и действия имеют постоянные идентификаторы,
-а текст, доступность и команды обновляются на месте. Обновление не зависит от
-события закрытия меню: после `down` тот же пункт становится **Connect**.
-TailTray помечает StatusNotifierItem как menu-only, поэтому левый и
-правый клик открывают одно и то же нативное меню Plasma без отдельного popup-окна.
-Для диагностики backend можно явно выбрать через `TAILTRAY_BACKEND=qt` или
+KDE Plasma usually needs no extra extension. TailTray supplies its own raster
+tray-icon directory to avoid loading an old symbolic icon from the global theme
+cache. KDE automatically selects the native Qt 6 backend: menu entries and
+actions have stable IDs, while labels, availability and commands update in place.
+Updates do not depend on a menu-close event: after `down`, the same item becomes
+**Connect**. TailTray marks its StatusNotifierItem as menu-only, so left and
+right clicks open the same native Plasma menu without a separate popup window.
+For diagnostics, explicitly select a backend with `TAILTRAY_BACKEND=qt` or
 `TAILTRAY_BACKEND=gtk`.
 
-Управление командами общее для обоих интерфейсов: операции выполняются
-последовательно, а устаревшие ответы опроса после изменения состояния
-отбрасываются. Disconnect во время подключения запоминается и выполняется
-после текущей команды. Ошибка чтения дополнительных настроек не стирает
-состояние соединения; свежие профили и настройки кэшируются на 30 секунд.
+Both interfaces share the same command controller. Operations run sequentially,
+and stale poll responses are discarded after a state change. A Disconnect
+requested while connecting is remembered and runs after the current command.
+Failure to read optional preferences does not erase connection status; fresh
+profiles and preferences are cached for 30 seconds.
 
-Обрыв связи с coordination server может оставить существующие туннели
-работоспособными. TailTray показывает предупреждение и позволяет daemon
-восстановить связь; автоматический `up` применяется к `Stopped`, а не к каждому
-сетевому предупреждению. `NeedsMachineAuth` требует одобрения устройства,
-а не повторной авторизации. Подробные переходы и границы проверки описаны в
-[модели состояния](docs/connection-state.md).
+A coordination-server outage can leave existing tunnels working. TailTray shows
+a warning and lets the daemon recover; automatic `up` applies to `Stopped`, not
+to every network warning. `NeedsMachineAuth` requires device approval rather than
+another sign-in. See the [connection-state model](docs/connection-state.md) for
+transitions and verification limits.
 
-Запуск прямо из checkout без установки:
+Run directly from the checkout without installing:
 
-```bash
+```fish
 make run
 ```
 
-## Авторизация без бесконечного login loop
+## Authentication without a recurring login loop
 
-В нормальной Linux-установке авторизация не принадлежит tray-приложению.
-Системный `tailscaled` хранит её в `/var/lib/tailscale/tailscaled.state` и
-работает ещё до входа пользователя в desktop. Поэтому TailTray не вызывает
-login при каждом старте: если daemon уже авторизован, приложение сразу
-показывает текущее состояние.
+In a normal Linux installation, authentication belongs to the daemon, not the
+tray application. The system `tailscaled` service stores it in
+`/var/lib/tailscale/tailscaled.state` and runs before the user signs in to the
+desktop. TailTray therefore does not log in on every startup: if the daemon is
+already authenticated, the app immediately shows its current state.
 
-Если daemon сообщает `NeedsLogin`, по умолчанию TailTray один раз открывает
-официальный login URL. Для полностью автоматической повторной регистрации
-можно выбрать **Set up automatic sign-in…** и сохранить reusable auth key.
-Ключ хранится через Secret Service в пользовательском keyring, а при передаче
-CLI используется временный файл с mode `0600`; ключ не попадает в JSON config
-или process arguments.
+When the daemon reports `NeedsLogin`, TailTray opens the official login URL once
+by default. For fully automatic re-registration, choose **Set up automatic
+sign-in…** and save a reusable auth key. The key is stored through Secret Service
+in the user's keyring. It is passed to the CLI through a temporary file with mode
+`0600`, never through the JSON config or process arguments.
 
-Reusable auth key является bearer credential. Ограничивайте его tags,
-pre-approval и сроком действия. Для обычного ноутбука лучше один browser login
-и отключённый key expiration для конкретного устройства, чем вечный
-широкопривилегированный ключ.
+A reusable auth key is a bearer credential. Restrict its tags, pre-approval and
+lifetime. For a regular laptop, a single browser sign-in with key expiration
+disabled for that particular device is preferable to a permanent, broadly
+privileged key.
 
-Если авторизация всё равно теряется после перезагрузки, запустите read-only
-диагностику:
+If authentication still disappears after a reboot, run the read-only diagnostics:
 
-```bash
+```fish
 ./scripts/diagnose.sh
 ```
 
-Частые причины:
+Common causes:
 
-- `tailscaled` запускается вручную вместо systemd unit;
-- задан `--state=mem:` или временный custom `--state`;
-- `/var/lib/tailscale` очищается/не сохраняется;
-- администратор tailnet включил истечение node key;
-- локальному пользователю не назначен `--operator`.
+- `tailscaled` is started manually instead of through its systemd unit.
+- `--state=mem:` or a temporary custom `--state` is configured.
+- `/var/lib/tailscale` is cleared or not persisted.
+- The tailnet administrator has enabled node-key expiration.
+- The local user has not been assigned `--operator` permissions.
 
-Официальная документация: [Linux installation](https://tailscale.com/docs/install/linux),
+Official documentation: [Linux installation](https://tailscale.com/docs/install/linux),
 [Linux operator permission](https://tailscale.com/docs/reference/troubleshooting/linux/linux-operator-permission),
 [auth keys](https://tailscale.com/docs/features/access-control/auth-keys),
 [daemon config file](https://tailscale.com/kb/1654/tailscaled-config-file).
 
-## Пакеты, релизы и обновления
+## Packages, releases and updates
 
-CI проверяет приложение (включая Qt/GTK и D-Bus под Xvfb), затем собирает
-исходники, RPM для Fedora 43/44 и отдельные DEB для Debian 13 / Ubuntu 26.04. Пакеты имеют архитектуру
-`noarch`/`all`; они не включают сам Tailscale. Перед установкой добавьте его
-официальный репозиторий. Установка пакетов не переключает VPN, не назначает
-operator и не запускает сервисы автоматически.
+CI checks the application, including Qt/GTK and D-Bus under Xvfb, then builds the
+source archive, RPMs for Fedora 43/44 and separate DEBs for Debian 13 / Ubuntu
+26.04. Packages use the `noarch`/`all` architecture and do not bundle Tailscale.
+Add its official repository before installing. Package installation does not
+switch the VPN, assign an operator or start services automatically.
 
-Задания используют GitHub-hosted runners и изолированные контейнеры; privileged
-mode и проброс Docker socket не нужны. На каждом целевом дистрибутиве CI устанавливает пакет и
-проверяет импорт Qt/GTK/D-Bus-зависимостей.
+Jobs use GitHub-hosted runners and isolated containers, without privileged mode
+or Docker socket forwarding. On every target distribution, CI installs the
+package and verifies that its Qt/GTK/D-Bus dependencies can be imported.
 
-Для релиза обновите версию в `pyproject.toml`, `src/tailtray/__init__.py`, `packaging/tailtray.spec`,
-`packaging/debian/changelog` и AppStream `data/io.github.tailtray.metainfo.xml`,
-закоммитьте изменения и отправьте тег `vX.Y.Z`.
-Тег обязан совпадать с версией проекта. Пайплайн создаёт публичный GitHub Release
-с RPM, DEB, `tailtray-X.Y.Z.tar.gz`, `SHA256SUMS`, подписью, ключом и архивом
-подписанной истории. Ссылки не зависят от хранения временных CI artifacts.
-Авторизация — короткоживущий `GITHUB_TOKEN`, без персонального токена в CI.
-Приватный ключ — secret защищённого окружения `release`, доступного только
-релизным тегам; в Git хранится только публичный ключ. Release публикуется
-после успешных native/runtime и анонимных APT/DNF проверок.
+To release a version, update `pyproject.toml`, `src/tailtray/__init__.py`,
+`packaging/tailtray.spec`, `packaging/debian/changelog` and the AppStream file
+`data/io.github.tailtray.metainfo.xml`, commit the changes and push a `vX.Y.Z` tag.
+The tag must match the project version. The pipeline creates a public GitHub
+Release containing RPMs, DEBs, `tailtray-X.Y.Z.tar.gz`, `SHA256SUMS`, the signature,
+public key and a signed history archive. Download links do not depend on temporary
+CI artifact retention. Publication uses a short-lived `GITHUB_TOKEN`, not a
+personal token in CI. The private signing key is a secret in the protected
+`release` environment, accessible only to release tags; Git contains only the
+public key. The Release is published after native/runtime and anonymous APT/DNF
+checks succeed.
 
-Подписанные репозитории для обновлений через `dnf` / `apt` также собираются CI.
-Новый канал — `https://grek-off.github.io/tailtray`, раздаваемый GitHub Pages
-после успешного релиза. Прежний проверенный канал GitLab Pages
-`https://tailtray-657378.gitlab.io` сохраняется для установленных клиентов.
-Переключение репозитория добровольное, ключ подписи не меняется.
-Установка, подписи, история версий и выпуск следующего релиза:
-[docs/releases.md](docs/releases.md).
+CI also builds signed repositories for updates through `dnf` / `apt`. The new
+channel is `https://grek-off.github.io/tailtray`, served by GitHub Pages after a
+successful release. The previously verified GitLab Pages channel,
+`https://tailtray-657378.gitlab.io`, remains available for installed clients.
+Switching repositories is opt-in and does not change the signing key.
+See [docs/releases.md](docs/releases.md) for installation, signatures, version
+history and the next release procedure.
 
-Локальная сборка из закоммиченного HEAD:
+Build locally from the committed HEAD:
 
 ```fish
 bash scripts/build-packages.sh source
@@ -258,29 +254,29 @@ bash scripts/build-packages.sh rpm  # Fedora: rpm-build, python3, git
 bash scripts/build-packages.sh deb  # Debian: dpkg-dev, debhelper-compat, fakeroot, build-essential, python3, git
 ```
 
-Здесь Bash запускается явно, поскольку сборочный скрипт написан на Bash.
-Результаты находятся в `dist/`. Незафиксированные файлы не входят в архив.
+Bash is invoked explicitly because the build script is written for Bash. Output
+is written to `dist/`. Uncommitted files are not included in the source archive.
 
-## Проверка приложения
+## Testing
 
-```bash
+```fish
 make check
 ```
 
-Core-тесты не требуют работающего daemon или графической сессии. Полная ручная
-проверка требует desktop session, запущенного `tailscaled` и доступа к его Unix
-socket.
+Core tests do not require a running daemon or graphical session. Full manual
+verification requires a desktop session, a running `tailscaled` and access to its
+Unix socket.
 
-В графической сессии можно также запустить интеграционные автотесты:
+You can also run automated integration tests in a graphical session:
 
 ```fish
 env TAILTRAY_TEST_NATIVE_MENU=1 make check
 ```
 
-Они проверяют настоящий Qt-экспорт `/MenuBar` через отдельную D-Bus-шину:
-пять циклов Disconnect/Connect без события закрытия меню, а также обновление
-GTK-виджетов. Команды daemon подставные: эти тесты не отключают рабочий VPN.
-Требуются PySide6, GTK 3, `dbus-run-session` и `gdbus`.
+These exercise the actual Qt `/MenuBar` export on a separate D-Bus bus: five
+Disconnect/Connect cycles without a menu-close event, plus GTK widget updates.
+Daemon commands are faked, so the tests never disconnect the active VPN. They
+require PySide6, GTK 3, `dbus-run-session` and `gdbus`.
 
-Проект распространяется по лицензии MIT и не связан с Tailscale Inc.
-Tailscale и WireGuard являются товарными знаками их владельцев.
+The project is distributed under the MIT license and is not affiliated with
+Tailscale Inc. Tailscale and WireGuard are trademarks of their respective owners.
