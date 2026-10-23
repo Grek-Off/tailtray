@@ -1,6 +1,6 @@
 # Contributors
 
-- **Владимир Греков / Vladimir Grekov** ([Grek-Off](https://github.com/Grek-Off)) —
+- **Vladimir Grekov** ([Grek-Off](https://github.com/Grek-Off)) —
   creator and maintainer; product direction, testing and development.
   Public contact: [grekov.vs@gmail.com](mailto:grekov.vs@gmail.com).
 - **Codex by OpenAI** — AI-assisted implementation, debugging, tests and
